@@ -1,8 +1,22 @@
 /** One bounded native drag for an already approved Sidebar guest. */
 import { randomUUID } from 'node:crypto'
-import type { WebContents } from 'electron'
-
-type DragGuest = Pick<WebContents, 'debugger' | 'isDestroyed' | 'isLoadingMainFrame' | 'getURL' | 'on' | 'off'>
+type DragGuest = {
+  readonly debugger: {
+    isAttached(): boolean
+    attach(version: string): void
+    detach(): void
+    sendCommand(method: string, params?: object): Promise<unknown>
+    on(event: 'message', listener: (_event: unknown, method: string, params: unknown) => void): void
+    on(event: 'detach', listener: () => void): void
+    off(event: 'message', listener: (_event: unknown, method: string, params: unknown) => void): void
+    off(event: 'detach', listener: () => void): void
+  }
+  isDestroyed(): boolean
+  isLoadingMainFrame(): boolean
+  getURL(): string
+  on(event: 'did-start-navigation' | 'destroyed', listener: () => void): void
+  off(event: 'did-start-navigation' | 'destroyed', listener: () => void): void
+}
 type Point = { readonly x: number; readonly y: number }
 
 function validPoint(value: unknown): value is Point {

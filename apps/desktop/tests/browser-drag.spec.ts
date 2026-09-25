@@ -23,7 +23,7 @@ function fixture() {
     isDestroyed: () => state.destroyed,
     isLoadingMainFrame: () => state.loading,
     getURL: () => state.url,
-  }) as Parameters<BrowserDragLease['begin']>[0]
+  })
   const intercept = (data: object): void => { debuggerEvents.emit('message', undefined, 'Input.dragIntercepted', { data }) }
   return { guest, guestEvents, debuggerPort, state, sendCommand, intercept }
 }

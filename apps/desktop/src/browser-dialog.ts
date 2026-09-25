@@ -1,8 +1,22 @@
 /** One CDP dialog watch bound to one exact Sidebar guest document. */
 import { randomUUID } from 'node:crypto'
-import type { WebContents } from 'electron'
-
-type DialogGuest = Pick<WebContents, 'debugger' | 'isDestroyed' | 'isLoadingMainFrame' | 'getURL' | 'on' | 'off'>
+type DialogGuest = {
+  readonly debugger: {
+    isAttached(): boolean
+    attach(version: string): void
+    detach(): void
+    sendCommand(method: string, params?: object): Promise<unknown>
+    on(event: 'message', listener: (_event: unknown, method: string, params: unknown) => void): void
+    on(event: 'detach', listener: () => void): void
+    off(event: 'message', listener: (_event: unknown, method: string, params: unknown) => void): void
+    off(event: 'detach', listener: () => void): void
+  }
+  isDestroyed(): boolean
+  isLoadingMainFrame(): boolean
+  getURL(): string
+  on(event: 'did-navigate' | 'destroyed', listener: () => void): void
+  off(event: 'did-navigate' | 'destroyed', listener: () => void): void
+}
 type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 type PromptResponse = string | null | { readonly useDefault: true }
 
