@@ -1,6 +1,8 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignSecondaryState, BrowserForeignOptionResult, BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult,
+  BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignSecondaryState, BrowserDragPoint,
+  BrowserForeignOptionResult, BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
@@ -359,6 +361,69 @@ export async function stateForBrowserForeignSecondary(guest: FullPageCaptureGues
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint,
     ...(raw.expanded === null ? {} : { expanded: raw.expanded }) }
+}
+
+/** Resolve one viewport pixel through an exact, fully approved native frame tree. */
+export async function pointForBrowserDrag(guest: FullPageCaptureGuest, expectedUrl: string,
+  x: unknown, y: unknown, approvedOrigins: readonly string[]): Promise<BrowserDragPoint> {
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y) ||
+    x < 0 || y < 0 || x > MAX_DIMENSION || y > MAX_DIMENSION) throw new Error('SIDEBAR_DRAG_UNAVAILABLE')
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  let frame = guest.mainFrame
+  let localX = x
+  let localY = y
+  for (let depth = 0; depth <= 8; depth++) {
+    if (frame.executeJavaScript === undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    const raw = await frame.executeJavaScript(`(() => {
+      if (location.href !== ${JSON.stringify(frame.url)}) throw new Error('SIDEBAR_NAVIGATED');
+      const x = ${JSON.stringify(localX)}, y = ${JSON.stringify(localY)};
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+        throw new Error('SIDEBAR_POINT_OUT_OF_BOUNDS');
+      }
+      const hit = document.elementFromPoint(x,y);
+      if (!hit) throw new Error('SIDEBAR_TARGET_OCCLUDED');
+      const rect = hit.getBoundingClientRect();
+      if (!hit.matches('iframe,frame')) {
+        return {kind:'hit',fingerprint:[hit.tagName,hit.id,hit.getAttribute('role'),
+          hit.getAttribute('aria-label'),hit.getAttribute('type'),hit.getAttribute('href'),
+          rect.left,rect.top,rect.width,rect.height].join('|')};
+      }
+      if (getComputedStyle(hit).transform !== 'none' ||
+        Math.abs(rect.width - hit.offsetWidth) > 1 || Math.abs(rect.height - hit.offsetHeight) > 1) {
+        throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+      }
+      const childX = x - rect.left - hit.clientLeft;
+      const childY = y - rect.top - hit.clientTop;
+      if (childX < 0 || childY < 0 || childX >= hit.clientWidth || childY >= hit.clientHeight) {
+        throw new Error('SIDEBAR_POINT_OUT_OF_BOUNDS');
+      }
+      const source = hit.getAttribute('src');
+      const src = hit.hasAttribute('srcdoc') ? 'about:srcdoc'
+        : source ? new URL(source, document.baseURI).href : 'about:blank';
+      return {kind:'frame',src,name:hit.getAttribute('name') || '',x:childX,y:childY};
+    })()`)
+    if (!record(raw)) throw new Error('SIDEBAR_POINT_UNAVAILABLE')
+    if (raw.kind === 'hit' && typeof raw.fingerprint === 'string' && raw.fingerprint.length <= 1024) {
+      if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: frame.origin,
+        fingerprint: before, targetFingerprint: createHash('sha256').update(JSON.stringify(
+          [frame.frameTreeNodeId, raw.fingerprint])).digest('hex') }
+    }
+    if (raw.kind !== 'frame' || typeof raw.src !== 'string' || raw.src.length > 16_384 ||
+      typeof raw.name !== 'string' || raw.name.length > 256 ||
+      typeof raw.x !== 'number' || typeof raw.y !== 'number' ||
+      !Number.isFinite(raw.x) || !Number.isFinite(raw.y) || frame.frames === undefined) {
+      throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    }
+    const matches = frame.frames.filter(child => !child.detached && child.url === raw.src && child.name === raw.name)
+    if (matches.length !== 1 || matches[0] === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
+    frame = matches[0]
+    localX = raw.x
+    localY = raw.y
+  }
+  throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
 }
 
 /** Change one approved foreign select using bounded exact option matchers. */

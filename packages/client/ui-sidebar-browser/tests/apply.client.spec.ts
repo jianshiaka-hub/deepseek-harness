@@ -82,6 +82,7 @@ describe('ui-sidebar-browser apply', () => {
       foreignRefPoint: vi.fn(async () => { throw new Error('not used in apply test') }),
       foreignInputState: vi.fn(async () => { throw new Error('not used in apply test') }),
       foreignSecondaryState: vi.fn(async () => { throw new Error('not used in apply test') }),
+      dragPoint: vi.fn(async () => { throw new Error('not used in apply test') }),
       selectForeignOption: vi.fn(async () => { throw new Error('not used in apply test') }),
       selectForeignText: vi.fn(async () => { throw new Error('not used in apply test') }),
       captureViewport: vi.fn(async () => { throw new Error('not used in apply test') }),

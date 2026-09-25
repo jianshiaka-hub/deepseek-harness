@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, locateBrowserForeignFrame,
-  pointForBrowserForeignRef, stateForBrowserForeignInput,
+  pointForBrowserForeignRef, pointForBrowserDrag, stateForBrowserForeignInput,
   readBrowserForeignText,
   type ViewportCaptureGuest } from '../src/browser-full-page.ts'
 
@@ -214,6 +214,28 @@ describe('main-owned Sidebar full-page capture', () => {
     h.frame.framesInSubtree.push(twin)
     Object.assign(h.frame, { frames: [foreign, twin] })
     await expect(pointForBrowserForeignRef(h.guest, url, ref(), sites))
+      .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
+  })
+
+  it('checks each drag pixel against the exact approved and uniquely bound foreign frame', async () => {
+    const h = fixture()
+    const foreignUrl = 'https://embedded.test/widget'
+    const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: foreignUrl, name: 'widget', parent: h.frame, framesInSubtree: [],
+      executeJavaScript: vi.fn(async () => ({ kind: 'hit', fingerprint: 'DIV|drag-source' })) }
+    Object.assign(h.frame, { frames: [foreign],
+      executeJavaScript: vi.fn(async () => ({ kind: 'frame', src: foreignUrl, name: 'widget', x: 12, y: 9 })) })
+    h.frame.framesInSubtree.push(foreign)
+    await expect(pointForBrowserDrag(h.guest, url, 40, 60, ['https://example.test']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    const approved = ['https://example.test', 'https://embedded.test']
+    const point = await pointForBrowserDrag(h.guest, url, 40, 60, approved)
+    expect(point).toMatchObject({ url, origin: 'https://embedded.test' })
+    expect(point.targetFingerprint).toMatch(/^[a-f0-9]{64}$/u)
+    const twin = { ...foreign, frameTreeNodeId: 3 }
+    h.frame.framesInSubtree.push(twin)
+    Object.assign(h.frame, { frames: [foreign, twin] })
+    await expect(pointForBrowserDrag(h.guest, url, 40, 60, approved))
       .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
   })
 

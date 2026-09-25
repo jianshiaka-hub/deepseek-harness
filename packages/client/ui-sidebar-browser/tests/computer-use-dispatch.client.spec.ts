@@ -114,6 +114,8 @@ it('reports only the active Browser tab and routes approved observations and nav
   await h.execute(current!, command('locate', { query }), () => true)
   await h.execute(current!, command('secondary', { ref: 'x42-ref', action: 'focus',
     approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }), () => true)
+  await h.execute(current!, command('drag', { x: 12, y: 20, to: { x: 44, y: 22 },
+    approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }), () => true)
   await h.execute(current!, command('screenshot', { fullPage: true,
     approvedFrameOrigins: ['https://example.test'] }), () => true)
   await h.execute(current!, command('dialog'), () => true)
@@ -124,6 +126,9 @@ it('reports only the active Browser tab and routes approved observations and nav
   expect(h.face.locate).toHaveBeenCalledWith(tabId, url, query, undefined)
   expect(h.face.action).toHaveBeenCalledWith(tabId, url,
     { op: 'secondary', ref: 'x42-ref', action: 'focus',
+      approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }, expect.any(Function))
+  expect(h.face.action).toHaveBeenCalledWith(tabId, url,
+    { op: 'drag', x: 12, y: 20, to: { x: 44, y: 22 },
       approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }, expect.any(Function))
   expect(h.face.frameOrigins).toHaveBeenCalledWith(tabId, url)
   expect(h.face.screenshot).toHaveBeenCalledWith(tabId, url, undefined, true,

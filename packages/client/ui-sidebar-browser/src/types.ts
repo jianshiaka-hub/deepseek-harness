@@ -121,6 +121,15 @@ export interface BrowserForeignSecondaryState {
   readonly expanded?: 'true' | 'false'
 }
 
+/** Opaque hit check for one approved coordinate along a native drag path. */
+export interface BrowserDragPoint {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly targetFingerprint: string
+}
+
 /** Bounded result of selecting options in one approved foreign select element. */
 export interface BrowserForeignOptionResult {
   readonly url: string
@@ -194,6 +203,9 @@ export interface DesktopBrowserBridge {
   foreignSecondaryState(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
     action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'): Promise<BrowserForeignSecondaryState>
+  /** Revalidate one viewport drag coordinate through the approved native frame tree. */
+  dragPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    x: number, y: number, approvedOrigins: readonly string[]): Promise<BrowserDragPoint>
   /** Select unique enabled options in one approved foreign select element. */
   selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],

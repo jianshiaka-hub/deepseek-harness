@@ -60,6 +60,7 @@ export type BrowserDomAction =
     readonly x: number
     readonly y: number
     readonly to: { readonly x: number; readonly y: number }
+    readonly approvedFrameOrigins?: readonly string[]
   }
   | {
     readonly op: 'setValue'

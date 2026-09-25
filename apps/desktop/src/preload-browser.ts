@@ -36,6 +36,9 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignSecondaryState: (lease, expectedUrl, ref, approvedOrigins, action) => ipcRenderer.invoke(
       DESKTOP_IPC.browserForeignSecondaryState, lease, expectedUrl, ref, approvedOrigins, action) as
       ReturnType<DesktopBrowserBridge['foreignSecondaryState']>,
+    dragPoint: (lease, expectedUrl, x, y, approvedOrigins) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserDragPoint, lease, expectedUrl, x, y, approvedOrigins) as
+      ReturnType<DesktopBrowserBridge['dragPoint']>,
     selectForeignOption: (lease, expectedUrl, ref, approvedOrigins, options) => ipcRenderer.invoke(
       DESKTOP_IPC.browserSelectForeignOption, lease, expectedUrl, ref, approvedOrigins, options) as
       ReturnType<DesktopBrowserBridge['selectForeignOption']>,

@@ -142,7 +142,9 @@ export function apply(ctx: Context): void {
           throw new Error('SIDEBAR_DRAG_UNAVAILABLE')
         }
         return controller.action(tabId, command.expectedUrl,
-          { op: 'drag', x: command.args.x, y: command.args.y, to: command.args.to }, stillSelected)
+          { op: 'drag', x: command.args.x, y: command.args.y, to: command.args.to,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'key') {
         if (command.args.key === undefined) throw new Error('SIDEBAR_KEY_UNAVAILABLE')

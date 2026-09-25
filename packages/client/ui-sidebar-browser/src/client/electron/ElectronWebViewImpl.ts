@@ -1241,6 +1241,9 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeDrag(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'drag' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    if (lease === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const approved = action.approvedFrameOrigins
     const points = [action.x, action.y, action.to.x, action.to.y]
     if (!points.every(value => Number.isFinite(value) && value >= 0 && value <= 8192) ||
       action.x === action.to.x && action.y === action.to.y) throw new Error('SIDEBAR_DRAG_UNAVAILABLE')
@@ -1248,6 +1251,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       x: action.x + (action.to.x - action.x) * (index + 1) / 12,
       y: action.y + (action.to.y - action.y) * (index + 1) / 12,
     }))
+    let frameFingerprint: string | undefined
     const pointCode = (x: number, y: number): string => `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -1260,6 +1264,16 @@ export class ElectronWebViewImpl implements BrowserFrame {
           hit.getAttribute('aria-label'),hit.getAttribute('type'),hit.getAttribute('href')].join('|')};
     })()`
     const inspect = async (x: number, y: number): Promise<{ readonly title: string; readonly fingerprint: string }> => {
+      if (approved !== undefined) {
+        const point = await this.bridge.dragPoint(lease, expectedUrl, x, y, approved)
+        if (point.url !== expectedUrl || !approved.includes(point.origin) ||
+          frameFingerprint !== undefined && point.fingerprint !== frameFingerprint ||
+          !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+          throw new Error('SIDEBAR_SELECTION_CHANGED')
+        }
+        frameFingerprint ??= point.fingerprint
+        return { title: point.title, fingerprint: point.targetFingerprint }
+      }
       const value = await element.executeJavaScript(pointCode(x, y))
       if (typeof value !== 'object' || value === null || !('url' in value) || value.url !== expectedUrl ||
         !('title' in value) || typeof value.title !== 'string' ||
@@ -1268,7 +1282,9 @@ export class ElectronWebViewImpl implements BrowserFrame {
       return { title: value.title, fingerprint: value.fingerprint }
     }
     const source = await inspect(action.x, action.y)
-    await element.executeJavaScript(`(() => {
+    if (approved !== undefined) {
+      for (const point of path) await inspect(point.x, point.y)
+    } else await element.executeJavaScript(`(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
       for (const point of ${JSON.stringify(path)}) {
@@ -1280,8 +1296,6 @@ export class ElectronWebViewImpl implements BrowserFrame {
     await element.sendInputEvent({ type: 'mouseMove', x: action.x, y: action.y })
     const hovered = await inspect(action.x, action.y)
     if (hovered.fingerprint !== source.fingerprint) throw new Error('SIDEBAR_TARGET_MOVED')
-    const lease = this.lease
-    if (lease === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     const token = await this.bridge.beginDrag(lease, expectedUrl)
     let pressed = false
     let completed = false
@@ -1302,6 +1316,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
       await element.sendInputEvent({ type: 'mouseUp', ...last, button: 'left', clickCount: 1 })
       pressed = false
+      if (approved !== undefined) await inspect(last.x, last.y)
       completed = true
     } finally {
       if (pressed) await element.sendInputEvent({ type: 'mouseUp', ...last, button: 'left', clickCount: 1 }).catch(() => {})

@@ -25,6 +25,7 @@ export const DESKTOP_IPC = {
   browserForeignRefPoint: 'dsh-desktop:browser-foreign-ref-point',
   browserForeignInputState: 'dsh-desktop:browser-foreign-input-state',
   browserForeignSecondaryState: 'dsh-desktop:browser-foreign-secondary-state',
+  browserDragPoint: 'dsh-desktop:browser-drag-point',
   browserSelectForeignOption: 'dsh-desktop:browser-select-foreign-option',
   browserSelectForeignText: 'dsh-desktop:browser-select-foreign-text',
   browserCaptureViewport: 'dsh-desktop:browser-capture-viewport',

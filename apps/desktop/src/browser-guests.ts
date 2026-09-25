@@ -1,11 +1,14 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
 import { app, clipboard, ClipboardItem, session, type BrowserWindow, type Session, type WebContents } from 'electron'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignSecondaryState, BrowserForeignOptionResult, BrowserForeignSelectionResult, DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateResult, BrowserForeignRefPoint,
+  BrowserForeignInputState, BrowserForeignSecondaryState, BrowserDragPoint, BrowserForeignOptionResult,
+  BrowserForeignSelectionResult, DesktopBrowserLeaseId, DesktopBrowserOpenRequest,
+  DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, readBrowserForeignText,
   locateBrowserForeignFrame, pointForBrowserForeignRef, stateForBrowserForeignInput,
-  stateForBrowserForeignSecondary, selectBrowserForeignOption,
+  stateForBrowserForeignSecondary, pointForBrowserDrag, selectBrowserForeignOption,
   selectBrowserForeignText,
   type BrowserForeignText, type BrowserFrameAudit } from './browser-full-page.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
@@ -461,6 +464,37 @@ export class DesktopBrowserGuests {
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await stateForBrowserForeignSecondary(guest, expectedUrl, ref, approvedOrigins, action)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during awaited frame reads.
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  /** Resolve a drag pixel only inside the current selected and fully approved guest frame tree. */
+  async dragPoint(owner: WebContents, id: unknown, expectedUrl: unknown,
+    x: unknown, y: unknown, approvedOrigins: unknown): Promise<BrowserDragPoint> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||
+      !Array.isArray(approvedOrigins) || !approvedOrigins.every(origin => typeof origin === 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await pointForBrowserDrag(guest, expectedUrl, x, y, approvedOrigins)
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during awaited frame reads.
       if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
         throw new Error('SIDEBAR_NAVIGATED')

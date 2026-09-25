@@ -28,6 +28,7 @@ export function electronFixture(initial?: BrowserTabState) {
     foreignRefPoint: vi.fn(async () => { throw new Error('not used in this harness') }),
     foreignInputState: vi.fn(async () => { throw new Error('not used in this harness') }),
     foreignSecondaryState: vi.fn(async () => { throw new Error('not used in this harness') }),
+    dragPoint: vi.fn(async () => { throw new Error('not used in this harness') }),
     selectForeignOption: vi.fn(async () => { throw new Error('not used in this harness') }),
     selectForeignText: vi.fn(async () => { throw new Error('not used in this harness') }),
     captureViewport: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({

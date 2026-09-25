@@ -508,6 +508,53 @@ async function qualify() {
       number:document.querySelector('[aria-label="Foreign count"]').value,
       numberTrusted:document.body.dataset.foreignNumberTrusted})`),
     {menu:'true',toggle:'true',expanded:'false',number:'2',numberTrusted:'true'})
+    await foreignFrame.executeJavaScript(`(() => {
+      const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;margin:8px 0';
+      const source = document.createElement('div'); source.id = 'foreignDragSource';
+      source.textContent = 'Foreign drag source'; source.draggable = true;
+      source.style.cssText = 'width:105px;height:35px;background:#ff8';
+      source.addEventListener('dragstart', event => {
+        event.dataTransfer.setData('text/plain', 'foreign-payload');
+        document.body.dataset.foreignDragTrusted = String(event.isTrusted);
+      });
+      const target = document.createElement('div'); target.id = 'foreignDropTarget';
+      target.textContent = 'Foreign drop target';
+      target.style.cssText = 'width:105px;height:35px;background:#8ff';
+      target.addEventListener('dragover', event => event.preventDefault());
+      target.addEventListener('drop', event => {
+        event.preventDefault();
+        document.body.dataset.foreignDropTrusted = String(event.isTrusted);
+        document.body.dataset.foreignDropValue = event.dataTransfer.getData('text/plain');
+      });
+      row.append(source,target); document.body.prepend(row);
+    })()`)
+    const foreignDragLocal = await foreignFrame.executeJavaScript(`(() => {
+      const point = id => { const r = document.getElementById(id).getBoundingClientRect();
+        return {x:r.left + r.width / 2,y:r.top + r.height / 2}; };
+      return {from:point('foreignDragSource'),to:point('foreignDropTarget')};
+    })()`)
+    const foreignDragOuter = await foreignGuest.mainFrame.executeJavaScript(`(() => {
+      const frame = document.getElementById('foreign');
+      const rect = frame.getBoundingClientRect();
+      return {x:rect.left + frame.clientLeft,y:rect.top + frame.clientTop};
+    })()`)
+    const foreignDragFrom = [foreignDragOuter.x + foreignDragLocal.from.x,
+      foreignDragOuter.y + foreignDragLocal.from.y]
+    const foreignDragTo = [foreignDragOuter.x + foreignDragLocal.to.x,
+      foreignDragOuter.y + foreignDragLocal.to.y]
+    const crossDrag = await control('/invoke', { sessionId,
+      code: `await t.screenshot({emit:false}); const result = await t.drag(${JSON.stringify(foreignDragFrom)},${JSON.stringify(foreignDragTo)}); return 'FOREIGN_DRAG_' + String(result.dropDispatched);` })
+    await writeFile(join(root, 'computer-use-cross-origin-drag.json'),
+      JSON.stringify({ sessionId, tool: crossDrag, foreignDragFrom, foreignDragTo }, null, 2))
+    assert.equal(crossDrag.result?.isError, false, JSON.stringify(crossDrag.result))
+    assert.equal(crossDrag.result?.value?.ok, true, JSON.stringify(crossDrag.result))
+    assert.match(crossDrag.result.value.result, /FOREIGN_DRAG_true/)
+    assert.equal(crossDrag.approvals.filter(approval => approval.allowed).length,
+      crossSecondary.approvals.filter(approval => approval.allowed).length + 1,
+      'foreign drag needs one-use confirmation after every frame site is approved')
+    assert.deepEqual(await foreignFrame.executeJavaScript(`({drag:document.body.dataset.foreignDragTrusted,
+      drop:document.body.dataset.foreignDropTrusted,value:document.body.dataset.foreignDropValue})`),
+    {drag:'true',drop:'true',value:'foreign-payload'})
     await foreignFrame.executeJavaScript(`document.body.insertAdjacentHTML('beforeend',
       '<div style="height:1400px">Foreign scroll tail</div>')`)
     const foreignScrollBefore = await foreignFrame.executeJavaScript('window.scrollY')
@@ -518,7 +565,7 @@ async function qualify() {
     assert.equal(crossScroll.result?.value?.ok, true, JSON.stringify(crossScroll.result))
     assert.match(crossScroll.result.value.result, /FOREIGN_SCROLL_OK/)
     assert.equal(crossScroll.approvals.filter(approval => approval.allowed).length,
-      crossSecondary.approvals.filter(approval => approval.allowed).length,
+      crossDrag.approvals.filter(approval => approval.allowed).length,
       'Foreign-frame scroll uses approved site access without click or text confirmation')
     await waitFor(() => foreignFrame.executeJavaScript(`window.scrollY > ${foreignScrollBefore}`),
       'trusted foreign-frame wheel scroll', 5000)
