@@ -42,6 +42,10 @@ it('bounds multi-step relative has filters to descendants of each candidate', as
     const refined = await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
       filter: { has: { ...relative, filter: { hasText: 'Inside' } } } })
     expect(refined?.count).toBe(1)
+    const composed = await h.frame.locate?.(url, { method: 'locator', value: '#matching', exact: false,
+      combine: { method: 'and', query: { method: 'locator', value: 'section', exact: false,
+        filter: { has: relative } } } })
+    expect(composed?.count).toBe(1)
     const crossFrameRelative = { ...relative, frames: ['iframe'] }
     await expect(h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
       filter: { has: crossFrameRelative } })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
