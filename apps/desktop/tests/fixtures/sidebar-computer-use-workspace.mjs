@@ -498,6 +498,10 @@ async function qualify() {
     assert.equal(crossSecondary.approvals.filter(approval => approval.allowed).length,
       crossShot.approvals.filter(approval => approval.allowed).length + 6,
       'each foreign secondary action needs one-use confirmation')
+    assert.deepEqual(crossSecondary.approvals.slice(-6).map(approval =>
+      /执行(聚焦|打开菜单|展开|收起|增加|减少)/u.exec(approval.reason)?.[1]),
+    ['聚焦', '打开菜单', '展开', '收起', '增加', '减少'],
+    'each confirmation should identify its exact secondary action')
     assert.deepEqual(await foreignFrame.executeJavaScript(`({menu:document.body.dataset.foreignMenuTrusted,
       toggle:document.body.dataset.foreignToggleTrusted,
       expanded:document.querySelector('[aria-label="Foreign count"]').previousSibling.getAttribute('aria-expanded'),
