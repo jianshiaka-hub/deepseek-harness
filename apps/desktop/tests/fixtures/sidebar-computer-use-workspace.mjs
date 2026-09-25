@@ -285,6 +285,28 @@ async function qualify() {
     assert.deepEqual(sequentialState.events.filter(event => event.type === 'input').map(event => event.data), ['A','你','😀'])
     assert.equal(sequentialState.events.filter(event => event.type === 'keydown' && event.trusted).length, 3)
     assert.ok(sequentialState.events.every(event => event.trusted))
+    const crossUrl = new URL('/cross-origin', pageUrl).href
+    await window.webContents.executeJavaScript(`(${address}).focus(); (${address}).select()`)
+    await window.webContents.insertText(crossUrl)
+    await waitFor(() => window.webContents.executeJavaScript(`(${address}).value === ${JSON.stringify(crossUrl)}`),
+      'Cross-origin page address')
+    await press(window, `document.querySelector('button[aria-label="前往"]')`)
+    await waitFor(() => window.webContents.executeJavaScript(`(() => {
+      const view = [...document.querySelectorAll('webview')].find(view =>
+        view.getURL() === ${JSON.stringify(crossUrl)} && !view.isLoading());
+      return view ? view.executeJavaScript('document.body.dataset.embeddedReady === "yes"') : false;
+    })()`),
+    'cross-origin Sidebar frame ready')
+    await waitFor(async () => (await control('/status')).selectedTabs.some(tab =>
+      tab.sessionId === sessionId && tab.observedUrl === crossUrl),
+    'cross-origin Sidebar reporter registration', 10000)
+    const crossShot = await control('/invoke', { sessionId,
+      code: `let crossViewport = await t.screenshot({emit:false}); let crossFull = await t.screenshot({fullPage:true,emit:false}); return 'CROSS_PNG_' + crossViewport.length + '_' + crossFull.length;` })
+    await writeFile(join(root, 'computer-use-cross-origin-screenshot.json'),
+      JSON.stringify({ sessionId, tool: crossShot }, null, 2))
+    assert.equal(crossShot.result?.isError, false, JSON.stringify(crossShot.result))
+    assert.equal(crossShot.result?.value?.ok, true, JSON.stringify(crossShot.result))
+    assert.match(crossShot.result.value.result, /CROSS_PNG_[1-9][0-9]*_[1-9][0-9]*/)
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {
