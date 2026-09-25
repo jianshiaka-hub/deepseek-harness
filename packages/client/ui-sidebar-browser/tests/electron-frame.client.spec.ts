@@ -11,10 +11,25 @@ it('clears a failed load when the main page retries without a toolbar command', 
     loadURL: vi.fn(async () => {}), getURL: () => url, getTitle: () => 'Recovered',
     canGoBack: () => false, canGoForward: () => false, clearHistory: vi.fn(),
     goBack: vi.fn(), goForward: vi.fn(), reload: vi.fn(), isLoading: () => loading,
+    executeJavaScript: vi.fn(async () => undefined), sendInputEvent: vi.fn(async () => {}),
+    insertText: vi.fn(async () => {}), paste: vi.fn(), capturePage: vi.fn(async () => {
+      throw new Error('not used in navigation test')
+    }),
   })
   const bridge: DesktopBrowserBridge = {
     acquire: vi.fn(async () => ({ lease: 'lease' as DesktopBrowserLeaseId, partition: 'partition' })),
     release: vi.fn(async () => {}), onOpenRequested: () => () => {},
+    captureFullPage: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    beginPaste: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    finishPaste: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    beginDrag: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    finishDrag: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    beginDialog: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    navigate: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    getDialog: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    waitDialog: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    handleDialog: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    finishDialog: vi.fn(async () => { throw new Error('not used in navigation test') }),
   }
   const presentation = new ElectronWebviewPresentation({ mounted: () =>{  frame.attach() }, unmounted: () =>{  frame.detach() } })
   const frame = new ElectronWebViewImpl({ initial: undefined, persist: vi.fn(), openRequested: vi.fn() },

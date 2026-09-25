@@ -1,8 +1,12 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
-import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
-import type { DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import { app, clipboard, ClipboardItem, session, type BrowserWindow, type Session, type WebContents } from 'electron'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
+import { captureBrowserFullPage } from './browser-full-page.ts'
+import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
+import { BrowserDragLease } from './browser-drag.ts'
+import { BrowserDialogLease, type BrowserDialogInfo } from './browser-dialog.ts'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -16,9 +20,38 @@ interface GuestLease {
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
   private readonly leases = new Map<DesktopBrowserLeaseId, GuestLease>()
+  private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
+  private readonly dragLease = new BrowserDragLease()
+  private readonly dialogLease = new BrowserDialogLease()
+  private readonly activeDialogs = new Map<DesktopBrowserLeaseId, string>()
+  private readonly activeNavigations = new Set<string>()
+  private activePaste: {
+    readonly owner: WebContents
+    readonly lease: DesktopBrowserLeaseId
+    readonly token: string
+  } | undefined
+  private activeDrag: {
+    readonly owner: WebContents
+    readonly lease: DesktopBrowserLeaseId
+    readonly token: string
+    readonly expectedUrl: string
+  } | undefined
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
-  constructor(private readonly hostUrl: () => string | undefined) {}
+  constructor(private readonly hostUrl: () => string | undefined,
+    private readonly guestPreloadPath: string) {}
+
+  private clearExpiredPaste(): void {
+    if (this.activePaste !== undefined && this.clipboardLease.activeToken !== this.activePaste.token) {
+      this.activePaste = undefined
+    }
+  }
+
+  private clearExpiredDrag(): void {
+    if (this.activeDrag !== undefined && this.dragLease.activeToken !== this.activeDrag.token) {
+      this.activeDrag = undefined
+    }
+  }
 
   /**
    * Reserve one guest in a workspace's process-lifetime partition.
@@ -53,12 +86,254 @@ export class DesktopBrowserGuests {
     if (lease === undefined) return
     if (lease.owner !== owner) throw new Error('desktop browser: guest belongs to another window')
     lease.releaseInput?.()
+    this.clearExpiredPaste()
+    if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
+    this.clearExpiredDrag()
+    if (this.activeDrag?.lease === key) await this.finishDrag(owner, key, this.activeDrag.token)
+    const dialogToken = this.activeDialogs.get(key)
+    if (dialogToken !== undefined) await this.finishDialog(owner, key, dialogToken)
     this.leases.delete(key)
     const guest = lease.guest
     if (guest !== undefined && !guest.isDestroyed()) {
       const destroyed = new Promise<void>((resolve) => { guest.once('destroyed', resolve) })
       guest.close({ waitForBeforeUnload: false })
       await destroyed
+    }
+  }
+
+  /** Stage a short native paste for only the caller's live, exact-URL guest. */
+  async beginPaste(owner: WebContents, id: unknown, expectedUrl: unknown, payload: unknown): Promise<string> {
+    this.clearExpiredPaste()
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||
+      typeof payload !== 'object' || payload === null || Array.isArray(payload) ||
+      Object.keys(payload).some(key => !['text', 'format', 'plainText'].includes(key)) ||
+      !('text' in payload) || !('format' in payload) ||
+      typeof payload.text !== 'string' || typeof payload.format !== 'string' ||
+      'plainText' in payload && payload.plainText !== undefined &&
+        typeof payload.plainText !== 'string') throw new Error('SIDEBAR_PASTE_UNAVAILABLE')
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.getURL() !== expectedUrl || guest.isLoadingMainFrame() ||
+      this.activePaste !== undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    let changed = false
+    const invalidate = (): void => { changed = true }
+    guest.on('did-start-navigation', invalidate)
+    guest.on('destroyed', invalidate)
+    try {
+      const token = await this.clipboardLease.begin(payload as PastePayload)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events can invalidate an awaited clipboard write.
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
+        guest.getURL() !== expectedUrl || owner.isDestroyed()) {
+        await this.clipboardLease.finish(token)
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      this.activePaste = { owner, lease: key, token }
+      return token
+    } finally {
+      guest.off('did-start-navigation', invalidate)
+      guest.off('destroyed', invalidate)
+    }
+  }
+
+  /** Restore the prior clipboard unless a newer user copy replaced the staged paste. */
+  async finishPaste(owner: WebContents, id: unknown, token: unknown): Promise<RestoreResult> {
+    this.clearExpiredPaste()
+    const active = this.activePaste
+    if (typeof id !== 'string' || typeof token !== 'string' || active === undefined ||
+      active.owner !== owner || active.lease !== id || active.token !== token) {
+      throw new Error('SIDEBAR_CLIPBOARD_LEASE_UNAVAILABLE')
+    }
+    try { return await this.clipboardLease.finish(token) }
+    finally { if (this.activePaste === active) this.activePaste = undefined }
+  }
+
+  /** Enable native HTML drag interception for this one owned, exact-URL guest. */
+  async beginDrag(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
+    this.clearExpiredDrag()
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_DRAG_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl ||
+      this.activeDrag !== undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const token = await this.dragLease.begin(guest, expectedUrl)
+    if (this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
+      guest.getURL() !== expectedUrl || owner.isDestroyed()) {
+      await this.dragLease.cancel(token)
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
+    this.activeDrag = { owner, lease: key, token, expectedUrl }
+    return token
+  }
+
+  /** Drop only into the same guest, or cancel without exposing captured page drag data. */
+  async finishDrag(owner: WebContents, id: unknown, token: unknown, point?: unknown): Promise<{ readonly dropped: boolean }> {
+    this.clearExpiredDrag()
+    const active = this.activeDrag
+    if (typeof id !== 'string' || typeof token !== 'string' || active === undefined ||
+      active.owner !== owner || active.lease !== id || active.token !== token) {
+      throw new Error('SIDEBAR_DRAG_LEASE_UNAVAILABLE')
+    }
+    try { return await this.dragLease.finish(token, active.expectedUrl, point) }
+    finally { if (this.activeDrag === active) this.activeDrag = undefined }
+  }
+
+  /** Watch only this owned guest for an action-triggered JavaScript modal. */
+  async beginDialog(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    const previous = this.activeDialogs.get(key)
+    if (previous !== undefined) {
+      try { this.dialogLease.get(previous); throw new Error('SIDEBAR_DIALOG_BUSY') }
+      catch (error) {
+        if (!(error instanceof Error) || error.message !== 'SIDEBAR_DIALOG_LEASE_UNAVAILABLE') throw error
+        this.activeDialogs.delete(key)
+      }
+    }
+    const token = await this.dialogLease.begin(guest, expectedUrl)
+    this.activeDialogs.set(key, token)
+    return token
+  }
+
+  /** Accept a prompt only from a currently watched, owned guest frame. */
+  offerPrompt(guest: WebContents, sourceUrl: string | undefined,
+    respond: (answer: string | null | { readonly useDefault: true }) => void): void {
+    if (typeof sourceUrl !== 'string') { respond(null); return }
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerPrompt(token, sourceUrl, respond)) return
+    }
+    respond(null)
+  }
+
+  /** One fixed, URL-bound navigation per active dialog watch; page code cannot replace the isolated-world method. */
+  navigate(owner: WebContents, id: unknown, token: unknown, expectedUrl: unknown,
+    method: unknown, destination: unknown): void {
+    const key = this.dialogToken(owner, id, token)
+    const guest = this.leases.get(key)?.guest
+    if (guest === undefined || guest.isDestroyed() || guest.isLoadingMainFrame() ||
+      typeof expectedUrl !== 'string' || guest.getURL() !== expectedUrl ||
+      !this.allowedNavigation(expectedUrl) ||
+      !['goto', 'back', 'forward'].includes(method as string) ||
+      (method === 'goto' && (typeof destination !== 'string' || !this.allowedNavigation(destination) ||
+        new URL(destination).href !== destination)) ||
+      (method !== 'goto' && destination !== undefined) ||
+      this.dialogLease.get(token as string) !== null || this.activeNavigations.has(token as string)) {
+      throw new Error('SIDEBAR_NAVIGATION_UNAVAILABLE')
+    }
+    const command = method === 'goto'
+      ? destination === expectedUrl ? 'location.reload()' : `location.assign(${JSON.stringify(destination)})`
+      : method === 'back' ? 'history.back()' : 'history.forward()'
+    const code = `(() => {
+      if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
+      ${command};
+    })()`
+    this.activeNavigations.add(token as string)
+    try {
+      // Page unload can destroy the evaluation context while the navigation
+      // succeeds. The Client reports success only from observed guest events.
+      void guest.executeJavaScriptInIsolatedWorld(1001, [{ code }]).catch(() => {})
+    } catch (error) {
+      this.activeNavigations.delete(token as string)
+      throw error
+    }
+  }
+
+  /** Read only a modal handle and type; its page-provided text stays in the guest. */
+  getDialog(owner: WebContents, id: unknown, token: unknown): BrowserDialogInfo | null {
+    this.dialogToken(owner, id, token)
+    return this.dialogLease.get(token as string)
+  }
+
+  /** Await a dialog without exposing raw CDP commands to the renderer. */
+  waitDialog(owner: WebContents, id: unknown, token: unknown, timeoutMs: unknown): Promise<BrowserDialogInfo | null> {
+    this.dialogToken(owner, id, token)
+    if (timeoutMs !== undefined && typeof timeoutMs !== 'number') {
+      throw new Error('SIDEBAR_DIALOG_WAIT_UNAVAILABLE')
+    }
+    return this.dialogLease.wait(token as string, typeof timeoutMs === 'number' ? timeoutMs : 5000)
+  }
+
+  /** Resolve one matching handle; a stale handle cannot control a newer dialog. */
+  async handleDialog(owner: WebContents, id: unknown, token: unknown, dialogId: unknown,
+    action: unknown, text: unknown): Promise<void> {
+    const key = this.dialogToken(owner, id, token)
+    if (typeof dialogId !== 'string' || !['accept', 'dismiss'].includes(action as string) ||
+      text !== undefined && typeof text !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    await this.dialogLease.handle(token as string, dialogId, action as 'accept' | 'dismiss', text)
+    this.activeDialogs.delete(key)
+    this.activeNavigations.delete(token as string)
+  }
+
+  /** Abandon a watch and dismiss any open modal so the guest is not left blocked. */
+  async finishDialog(owner: WebContents, id: unknown, token: unknown): Promise<void> {
+    const key = this.dialogToken(owner, id, token)
+    this.activeDialogs.delete(key)
+    this.activeNavigations.delete(token as string)
+    await this.dialogLease.close(token as string)
+  }
+
+  private dialogToken(owner: WebContents, id: unknown, token: unknown): DesktopBrowserLeaseId {
+    if (typeof id !== 'string' || typeof token !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    if (lease === undefined || lease.owner !== owner || this.activeDialogs.get(key) !== token) {
+      throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    }
+    return key
+  }
+
+  /** Capture only a live guest owned by the authenticated application window. */
+  async captureFullPage(owner: WebContents, id: unknown, expectedUrl: unknown, clip: unknown): Promise<BrowserPageScreenshot> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    if (lease === undefined || lease.owner !== owner || !lease.attached || lease.guest === undefined ||
+      lease.guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    let rectangle: BrowserScreenshotClip | undefined
+    if (clip !== undefined) {
+      if (typeof clip !== 'object' || clip === null || Array.isArray(clip) ||
+        Object.keys(clip).some(field => !['x', 'y', 'width', 'height'].includes(field)) ||
+        !('x' in clip) || !('y' in clip) || !('width' in clip) || !('height' in clip) ||
+        typeof clip.x !== 'number' || typeof clip.y !== 'number' ||
+        typeof clip.width !== 'number' || typeof clip.height !== 'number') {
+        throw new Error('SIDEBAR_CLIP_OUT_OF_BOUNDS')
+      }
+      rectangle = { x: clip.x, y: clip.y, width: clip.width, height: clip.height }
+    }
+    const guest = lease.guest
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await captureBrowserFullPage(guest, expectedUrl, rectangle)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during the awaited capture.
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
     }
   }
 
@@ -87,6 +362,7 @@ export class DesktopBrowserGuests {
         nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false,
         contextIsolation: true, sandbox: true, webSecurity: true, allowRunningInsecureContent: false,
         webviewTag: false, plugins: false, navigateOnDragDrop: false, disableDialogs: true,
+        preload: this.guestPreloadPath,
         devTools: !app.isPackaged,
       })
       params.httpreferrer = ''

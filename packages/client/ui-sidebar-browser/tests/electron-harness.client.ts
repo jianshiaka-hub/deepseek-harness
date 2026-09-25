@@ -1,6 +1,6 @@
 /** Native webview events controlled by each test; presentation and navigation stay real. */
 import { vi } from 'vitest'
-import type { DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
+import type { BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
 import type { BrowserTabState } from '../src/client/browser/BrowserPersistence.ts'
 import { createElectronPage } from '../src/client/electron/pages.ts'
 import { ElectronWebviewPresentation } from '../src/client/electron/ElectronWebviewPresentation.ts'
@@ -14,6 +14,26 @@ export function electronFixture(initial?: BrowserTabState) {
   const bridge = {
     acquire: vi.fn(async (_workspace: string) => reservation),
     release: vi.fn(async (_lease: DesktopBrowserLeaseId) => {}),
+    captureFullPage: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
+      url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+      viewport: { width: 1, height: 1 },
+    })),
+    beginPaste: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string,
+      _payload: { readonly text: string; readonly format: 'text' | 'md' | 'html'; readonly plainText?: string }) => 'paste-lease'),
+    finishPaste: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string) =>
+      ({ restored: true, superseded: false })),
+    beginDrag: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => 'drag-lease'),
+    finishDrag: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string,
+      _point?: { readonly x: number; readonly y: number }) => ({ dropped: true })),
+    beginDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => 'dialog-lease'),
+    navigate: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string, _url: string,
+      _method: 'goto' | 'back' | 'forward', _destination?: string) => {}),
+    getDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string): Promise<BrowserJsDialog | null> => null),
+    waitDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string,
+      _timeoutMs?: number): Promise<BrowserJsDialog | null> => null),
+    handleDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string, _dialogId: string,
+      _action: 'accept' | 'dismiss', _text?: string) => {}),
+    finishDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string) => {}),
     onOpenRequested: vi.fn((_lease: DesktopBrowserLeaseId, listener: (url: string) => void) => {
       opens.add(listener)
       return () => { opens.delete(listener) }

@@ -134,6 +134,22 @@ describe('SidebarRightController — opening', () => {
     } finally { unsubscribe() }
   })
 
+  it('publishes exactly the active tab and withdraws it on focus and seat release', () => {
+    const h = harness()
+    const releaseAdoption = h.adopt(SESSION, h.instance)
+    h.expand()
+    const releaseSeat = h.publish()
+    const guideId = h.tabOf('seed')
+    try {
+      expect(h.controller.selected.getSnapshot()).toEqual({ sessionId: SESSION, tabId: guideId })
+      h.controller.openResource('dsh-resource://file/session/s-test/a.txt')
+      expect(h.controller.selected.getSnapshot()).toEqual({ sessionId: SESSION, tabId: h.tabOf('a.txt') })
+      h.controller.focus(guideId)
+      expect(h.controller.selected.getSnapshot()).toEqual({ sessionId: SESSION, tabId: guideId })
+    } finally { releaseSeat(); releaseAdoption() }
+    expect(h.controller.selected.getSnapshot()).toBeUndefined()
+  })
+
   it('refuses an address no registered type claims, before touching the surface', () => {
     const { controller, publish, titles } = harness()
     publish()

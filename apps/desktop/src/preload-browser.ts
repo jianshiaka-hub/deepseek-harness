@@ -19,6 +19,28 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
   return {
     acquire: workspace => ipcRenderer.invoke(DESKTOP_IPC.browserAcquire, workspace) as ReturnType<DesktopBrowserBridge['acquire']>,
     release: lease => ipcRenderer.invoke(DESKTOP_IPC.browserRelease, lease) as Promise<void>,
+    captureFullPage: (lease, expectedUrl, clip) => ipcRenderer.invoke(DESKTOP_IPC.browserCaptureFullPage,
+      lease, expectedUrl, clip) as ReturnType<DesktopBrowserBridge['captureFullPage']>,
+    beginPaste: (lease, expectedUrl, payload) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteBegin,
+      lease, expectedUrl, payload) as ReturnType<DesktopBrowserBridge['beginPaste']>,
+    finishPaste: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteEnd,
+      lease, token) as ReturnType<DesktopBrowserBridge['finishPaste']>,
+    beginDrag: (lease, expectedUrl) => ipcRenderer.invoke(DESKTOP_IPC.browserDragBegin,
+      lease, expectedUrl) as ReturnType<DesktopBrowserBridge['beginDrag']>,
+    finishDrag: (lease, token, point) => ipcRenderer.invoke(DESKTOP_IPC.browserDragEnd,
+      lease, token, point) as ReturnType<DesktopBrowserBridge['finishDrag']>,
+    beginDialog: (lease, expectedUrl) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogBegin,
+      lease, expectedUrl) as ReturnType<DesktopBrowserBridge['beginDialog']>,
+    navigate: (lease, token, expectedUrl, method, destination) => ipcRenderer.invoke(DESKTOP_IPC.browserNavigate,
+      lease, token, expectedUrl, method, destination) as ReturnType<DesktopBrowserBridge['navigate']>,
+    getDialog: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogGet,
+      lease, token) as ReturnType<DesktopBrowserBridge['getDialog']>,
+    waitDialog: (lease, token, timeoutMs) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogWait,
+      lease, token, timeoutMs) as ReturnType<DesktopBrowserBridge['waitDialog']>,
+    handleDialog: (lease, token, dialogId, action, text) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogHandle,
+      lease, token, dialogId, action, text) as ReturnType<DesktopBrowserBridge['handleDialog']>,
+    finishDialog: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogEnd,
+      lease, token) as ReturnType<DesktopBrowserBridge['finishDialog']>,
     onOpenRequested(lease, listener) {
       let callbacks = listeners.get(lease)
       if (callbacks === undefined) { callbacks = new Set(); listeners.set(lease, callbacks) }

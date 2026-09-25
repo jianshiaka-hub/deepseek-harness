@@ -12,6 +12,10 @@
     "apps/desktop/src/keyboard.ts",
     "apps/desktop/src/keybindings.ts",
     "apps/desktop/src/browser-guests.ts",
+    "apps/desktop/src/browser-full-page.ts",
+    "apps/desktop/src/browser-clipboard.ts",
+    "apps/desktop/src/browser-drag.ts",
+    "apps/desktop/src/browser-dialog.ts",
     "apps/desktop/src/ipc.ts",
     "apps/desktop/src/update-overlay.ts"
   ],

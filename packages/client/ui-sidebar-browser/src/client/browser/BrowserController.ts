@@ -2,7 +2,7 @@
 import { createSnapshotStore, type BoundActions, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BrowserFrameState } from './BrowserFrame.ts'
+import type { BrowserDialogState, BrowserDomAction, BrowserDomActionResult, BrowserDomDialogResult, BrowserFrameState, BrowserLocateQuery, BrowserLocateResult, BrowserPageScreenshot, BrowserScreenshotClip } from './BrowserFrame.ts'
 import type { BrowserPage, BrowserPageFactory } from './BrowserPage.ts'
 import { currentBrowserTarget, type BrowserTabState } from './BrowserPersistence.ts'
 import type { BrowserStore } from './store.ts'
@@ -70,6 +70,138 @@ export class BrowserController implements HostObservable<BrowserControllerState>
         addressRevision: current.addressRevision + Number(changed) })
     })
     options.signal.addEventListener('abort', this.abort, { once: true })
+  }
+
+  /**
+   * Inspect a mounted desktop page only while its observed URL matches.
+   * @param expectedUrl - exact URL approved by the Host.
+   * @returns bounded page text, same-origin frame labels and title.
+   */
+  inspect(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }> {
+    if (this.disposed || this.page.frame.inspect === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    return this.page.frame.inspect(expectedUrl)
+  }
+
+  locate(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult> {
+    if (this.disposed || this.page.frame.locate === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    return this.page.frame.locate(expectedUrl, query)
+  }
+
+  /**
+   * Capture the selected desktop guest after its website grant, rejecting cross-origin frames.
+   * @param expectedUrl - exact observed URL approved by the Host.
+   * @param clip - optional rectangle within the viewport or full page.
+   * @param fullPage - capture the complete CSS page when true.
+   * @returns PNG bytes and CSS viewport or page dimensions.
+   */
+  screenshot(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot> {
+    if (this.disposed || this.page.frame.screenshot === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    return this.page.frame.screenshot(expectedUrl, clip, fullPage)
+  }
+
+  /**
+   * Perform one fixed desktop action while this occurrence remains live.
+   * @param expectedUrl - exact observed URL approved by the Host.
+   * @param action - allow-listed ref action with bounded arguments.
+   * @param stillSelected - rejects input if the owning Sidebar tab loses selection.
+   * @returns acknowledgement without new page content.
+   */
+  action(expectedUrl: string, action: BrowserDomAction, stillSelected?: () => boolean): Promise<BrowserDomDialogResult> {
+    if (this.disposed || this.page.frame.action === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    if (this.page.frame.actionWithDialog !== undefined) {
+      return this.page.frame.actionWithDialog(expectedUrl, action, stillSelected ?? (() => true))
+    }
+    return this.page.frame.action(expectedUrl, action, stillSelected)
+  }
+
+  dialog(expectedUrl: string, stillSelected: () => boolean): Promise<BrowserDialogState> {
+    if (this.disposed || this.page.frame.dialog === undefined) throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
+    return this.page.frame.dialog(expectedUrl, stillSelected)
+  }
+
+  pendingDialogUrl(): string | undefined {
+    return this.disposed ? undefined : this.page.frame.pendingDialogUrl?.()
+  }
+
+  handleDialog(expectedUrl: string, dialogId: string, action: 'accept' | 'dismiss',
+    text: string | undefined, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (this.disposed || this.page.frame.handleDialog === undefined) throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
+    return this.page.frame.handleDialog(expectedUrl, dialogId, action, text, stillSelected)
+  }
+
+  /**
+   * Navigate only the still-selected desktop occurrence and acknowledge its observed destination.
+   * @param expectedUrl - exact currently observed URL approved by the Host.
+   * @param destination - canonical HTTP(S) target whose origin was approved before navigation.
+   * @param stillSelected - revokes navigation if the user switches or closes the tab.
+   * @returns destination URL and title without page body; the Host checks redirected origins before release.
+   */
+  navigate(expectedUrl: string, destination: string, stillSelected: () => boolean): Promise<BrowserDomDialogResult> {
+    const parsed = parseBrowserAddress(destination, this.options.applicationOrigin)
+    if (!parsed.ok || parsed.target.url !== destination) throw new Error('SIDEBAR_URL_UNAVAILABLE')
+    if (this.page.frame.actionWithDialog !== undefined) {
+      return this.page.frame.actionWithDialog(expectedUrl,
+        { op: 'navigate', method: 'goto', url: destination }, stillSelected)
+    }
+    return this.awaitSelectedNavigation(expectedUrl, stillSelected, () => { this.loadUrl(destination) })
+  }
+
+  /** Move through existing native history, disclosing the destination only after Host site approval. */
+  navigateHistory(expectedUrl: string, direction: 'back' | 'forward',
+    stillSelected: () => boolean): Promise<BrowserDomDialogResult> {
+    const initial = this.store.getSnapshot().frame
+    if (direction === 'back' ? !initial.canGoBack : !initial.canGoForward) {
+      throw new Error('SIDEBAR_HISTORY_UNAVAILABLE')
+    }
+    if (this.page.frame.actionWithDialog !== undefined) {
+      return this.page.frame.actionWithDialog(expectedUrl,
+        { op: 'navigate', method: direction }, stillSelected)
+    }
+    return this.awaitSelectedNavigation(expectedUrl, stillSelected, () => {
+      if (direction === 'back') this.goBack()
+      else this.goForward()
+    })
+  }
+
+  private awaitSelectedNavigation(expectedUrl: string, stillSelected: () => boolean,
+    start: () => void): Promise<BrowserDomActionResult> {
+    const initial = this.store.getSnapshot().frame
+    if (this.disposed || initial.address !== 'observed' || initial.loading ||
+      initial.target?.url !== expectedUrl || !stillSelected()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    return new Promise((resolve, reject) => {
+      let unsubscribe = (): void => {}
+      let settled = false
+      let started = false
+      const finish = (error?: Error, value?: BrowserDomActionResult): void => {
+        if (settled) return
+        settled = true
+        unsubscribe()
+        clearInterval(selectionCheck)
+        clearTimeout(timeout)
+        this.options.signal.removeEventListener('abort', onAbort)
+        if (error !== undefined) reject(error)
+        else if (value !== undefined) resolve(value)
+      }
+      const check = (): void => {
+        if (this.disposed || !stillSelected()) { finish(new Error('SIDEBAR_SELECTION_CHANGED')); return }
+        const state = this.store.getSnapshot()
+        if (state.frame.loading || state.frame.address === 'requested') started = true
+        if (state.addressFailure !== undefined || state.frame.error !== undefined ||
+          state.frame.address === 'unknown' && !state.frame.loading) {
+          finish(new Error('SIDEBAR_NAVIGATION_FAILED')); return
+        }
+        if (started && state.frame.address === 'observed' && !state.frame.loading && state.frame.target !== undefined) {
+          finish(undefined, { url: state.frame.target.url, title: state.frame.target.title.slice(0, 512), performed: true })
+        }
+      }
+      const onAbort = (): void => { finish(new Error('SIDEBAR_TAB_UNAVAILABLE')) }
+      const timeout = setTimeout(() => { finish(new Error('SIDEBAR_NAVIGATION_TIMEOUT')) }, 12_000)
+      const selectionCheck = setInterval(check, 50)
+      this.options.signal.addEventListener('abort', onAbort, { once: true })
+      unsubscribe = this.subscribe(check)
+      try { start(); check() }
+      catch (error) { finish(error instanceof Error ? error : new Error('SIDEBAR_NAVIGATION_FAILED')) }
+    })
   }
 
   /** @returns immutable state for the common toolbar. */
@@ -181,6 +313,26 @@ export interface BrowserMountRequest {
 
 /** Plain Slot callbacks and a framework-bound state source, not a desktop protocol. */
 export interface BrowserInjected {
+  /** Latest state for one mounted tab without opening another tab. */
+  snapshot(tabId: TabId): BrowserControllerState | undefined
+  /** Inspect one mounted desktop tab. */
+  inspect(tabId: TabId, expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  /** Query a bounded set of DOM nodes in the selected desktop tab. */
+  locate(tabId: TabId, expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
+  /** Capture the visible viewport of one mounted desktop tab. */
+  screenshot(tabId: TabId, expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot>
+  /** Perform one fixed action on a mounted desktop tab. */
+  action(tabId: TabId, expectedUrl: string, action: BrowserDomAction, stillSelected?: () => boolean): Promise<BrowserDomDialogResult>
+  /** Read or resolve a modal from the immediately preceding watched action. */
+  dialog(tabId: TabId, expectedUrl: string, stillSelected: () => boolean): Promise<BrowserDialogState>
+  /** Exact old URL while a confirmed action waits on its JavaScript modal. */
+  pendingDialogUrl(tabId: TabId): string | undefined
+  handleDialog(tabId: TabId, expectedUrl: string, dialogId: string, action: 'accept' | 'dismiss',
+    text: string | undefined, stillSelected: () => boolean): Promise<BrowserDomActionResult>
+  /** Navigate the selected occurrence after Host approval and report only its observed destination. */
+  navigate(tabId: TabId, expectedUrl: string, destination: string, stillSelected: () => boolean): Promise<BrowserDomDialogResult>
+  /** Traverse native history and report only the observed destination. */
+  navigateHistory(tabId: TabId, expectedUrl: string, direction: 'back' | 'forward', stillSelected: () => boolean): Promise<BrowserDomDialogResult>
   readonly keyedHooks: {
     readonly browserState: (key: string) => HostObservable<BrowserControllerState> | undefined
   }
@@ -209,19 +361,31 @@ export interface BrowserInjected {
  * @param actions - persisted view-state writer.
  * @param createPage - composition-selected provider.
  * @param isTabOpen - authoritative layout membership, independent of mounted bodies and plugin lifetime.
+ * @param onChanged - notify the selected-tab reporter after state or lifetime changes.
  * @returns tab callbacks.
  */
 export function createBrowserControllers(actions: BoundActions<BrowserStore>, createPage: BrowserPageFactory,
-  isTabOpen: (tabId: TabId) => boolean): BrowserInjected {
+  isTabOpen: (tabId: TabId) => boolean, onChanged: () => void = () => {}): BrowserInjected {
   let currentActions = actions
   const controllers = new Map<TabId, {
     readonly signal: AbortSignal
     readonly controller: BrowserController
     readonly forget: () => void
+    readonly unsubscribe: () => void
   }>()
   const controller = (id: TabId): BrowserController | undefined => controllers.get(id)?.controller
   return {
     keyedHooks: { browserState: key => controller(key as TabId) },
+    snapshot: id => controller(id)?.getSnapshot(),
+    inspect: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.inspect(expectedUrl) },
+    locate: (id, expectedUrl, query) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.locate(expectedUrl, query) },
+    screenshot: (id, expectedUrl, clip, fullPage) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.screenshot(expectedUrl, clip, fullPage) },
+    action: (id, expectedUrl, action, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.action(expectedUrl, action, stillSelected) },
+    dialog: (id, expectedUrl, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.dialog(expectedUrl, stillSelected) },
+    pendingDialogUrl: id => controller(id)?.pendingDialogUrl(),
+    handleDialog: (id, expectedUrl, dialogId, action, text, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.handleDialog(expectedUrl, dialogId, action, text, stillSelected) },
+    navigate: (id, expectedUrl, destination, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.navigate(expectedUrl, destination, stillSelected) },
+    navigateHistory: (id, expectedUrl, direction, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.navigateHistory(expectedUrl, direction, stillSelected) },
     mount(request) {
       const { tabId, signal } = request
       if (signal.aborted) return () => {}
@@ -229,16 +393,21 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
       if (held?.signal !== signal) {
         if (held !== undefined) {
           held.signal.removeEventListener('abort', held.forget)
+          held.unsubscribe()
           void held.controller.dispose()
         }
         const created = new BrowserController({ ...request, actions: currentActions, createPage })
+        const unsubscribe = created.subscribe(onChanged)
         const forget = (): void => {
+          unsubscribe()
           controllers.delete(tabId)
+          onChanged()
           // Plugin unload also aborts occurrences; only layout removal deletes saved navigation.
           if (!isTabOpen(tabId)) currentActions.forget(tabId)
         }
-        held = { signal, controller: created, forget }
+        held = { signal, controller: created, forget, unsubscribe }
         controllers.set(tabId, held)
+        onChanged()
         signal.addEventListener('abort', forget, { once: true })
       }
       const hide = held.controller.mount(request.viewportId)
@@ -246,12 +415,14 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
       return hide
     },
     dispose: async () => {
-      const pending = [...controllers.values()].map(({ signal, controller, forget }) => {
+      const pending = [...controllers.values()].map(({ signal, controller, forget, unsubscribe }) => {
         signal.removeEventListener('abort', forget)
+        unsubscribe()
         return controller.dispose()
       })
       controllers.clear()
       await Promise.all(pending)
+      onChanged()
     },
     rebind: (actions) => {
       currentActions = actions

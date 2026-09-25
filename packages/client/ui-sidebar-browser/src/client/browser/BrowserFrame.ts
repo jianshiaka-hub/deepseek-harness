@@ -26,9 +26,113 @@ export interface BrowserSandboxControl {
   setEnabled(enabled: boolean): void
 }
 
+/** Fixed action accepted by a selected desktop document. */
+export type BrowserDomAction =
+  | {
+    readonly op: 'click'
+    readonly ref?: string
+    readonly x?: number
+    readonly y?: number
+    readonly button?: 'left' | 'middle' | 'right'
+    readonly count?: number
+    /** Internal precondition for an exposed expand/collapse action. */
+    readonly expectedExpanded?: 'true' | 'false'
+    /** Require the same interactive role that was exposed by inspection. */
+    readonly exposedRoleOnly?: boolean
+  }
+  | { readonly op: 'type'; readonly ref?: string; readonly text: string }
+  | {
+    readonly op: 'paste'
+    readonly ref?: string
+    readonly text: string
+    readonly format: 'text' | 'md' | 'html'
+  }
+  | {
+    readonly op: 'drag'
+    readonly x: number
+    readonly y: number
+    readonly to: { readonly x: number; readonly y: number }
+  }
+  | { readonly op: 'setValue'; readonly ref: string; readonly value: string }
+  | {
+    readonly op: 'selectText'
+    readonly ref: string
+    readonly text: string
+    readonly prefix?: string
+    readonly suffix?: string
+    readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
+  }
+  | {
+    readonly op: 'secondary'
+    readonly ref: string
+    readonly action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'
+  }
+  | { readonly op: 'key'; readonly ref?: string; readonly key: string; readonly numericOnly?: boolean }
+  | { readonly op: 'scroll'; readonly ref: string; readonly dx: number; readonly dy: number }
+  /** Agent navigation runs in the current page so Chromium can emit beforeunload. */
+  | { readonly op: 'navigate'; readonly method: 'goto' | 'back' | 'forward'; readonly url?: string }
+
+/** Acknowledgement without content from a possibly navigated document. */
+export interface BrowserDomActionResult {
+  readonly url: string
+  readonly title: string
+  readonly performed: true
+  readonly clipboardRestored?: boolean
+  readonly clipboardSuperseded?: boolean
+  /** True only when Chromium dispatched the intercepted HTML drag data to the destination. */
+  readonly dropDispatched?: boolean
+}
+
+export type { BrowserPageScreenshot, BrowserScreenshotClip } from '../../types.ts'
+import type { BrowserJsDialog, BrowserPageScreenshot, BrowserScreenshotClip } from '../../types.ts'
+
+/** A modal can interrupt an otherwise pending native input command. */
+export interface BrowserDomDialogResult extends BrowserDomActionResult {
+  readonly dialog?: BrowserJsDialog
+}
+
+/** Only the modal type and opaque handle leave the guest. */
+export interface BrowserDialogState {
+  readonly url: string
+  readonly title: string
+  readonly dialog: BrowserJsDialog | null
+}
+
+export interface BrowserLocateQuery {
+  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByTestId'
+  readonly value: string
+  readonly name?: string
+  readonly exact: boolean
+  readonly frames?: readonly string[]
+  readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
+}
+
+export interface BrowserLocateResult {
+  readonly url: string
+  readonly title: string
+  readonly count: number
+  readonly rows: readonly { readonly ref: string; readonly role: string; readonly name: string }[]
+}
+
 /** Navigation owns page lifetime; mounting and hiding belong to BrowserPresentation. */
 export interface BrowserFrame extends HostObservable<BrowserFrameState> {
   readonly sandbox?: BrowserSandboxControl
+  /** Inspect only the observed top-level HTTP(S) document in a desktop guest. */
+  inspect?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  /** Query bounded DOM nodes in the observed guest without executing caller JavaScript. */
+  locate?(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
+  /** Capture the observed guest's viewport or full page. */
+  screenshot?(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot>
+  /** Perform a fixed action on the same observed desktop document. */
+  action?(expectedUrl: string, action: BrowserDomAction, stillSelected?: () => boolean): Promise<BrowserDomActionResult>
+  /** Register a bounded CDP watch before sending agent input, so modal actions can return. */
+  actionWithDialog?(expectedUrl: string, action: BrowserDomAction,
+    stillSelected: () => boolean): Promise<BrowserDomDialogResult>
+  /** Read or resolve the modal opened by the preceding watched action. */
+  pendingDialogUrl?(): string | undefined
+  dialog?(expectedUrl: string, stillSelected: () => boolean): Promise<BrowserDialogState>
+  handleDialog?(expectedUrl: string, dialogId: string, action: 'accept' | 'dismiss',
+    text: string | undefined, stillSelected: () => boolean): Promise<BrowserDomActionResult>
   /** @param target - validated HTTP(S) address; loading failures are published in state. */
   loadUrl(target: BrowserTarget): void
   /** Move backward when the provider reports an available entry. */

@@ -14,6 +14,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../api/workspace-controller/tsconfig.client.json" },
     { "path": "../../util/brand" },
+    { "path": "../../util/crypto" },
     { "path": "../locale/tsconfig.client.json" },
     { "path": "../shortcuts/tsconfig.client.json" },
     { "path": "../store" },

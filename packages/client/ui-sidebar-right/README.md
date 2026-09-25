@@ -75,6 +75,8 @@ The store saves each Session's layout, tab identities, selection, split ratios, 
 
 `sidebarRight.openTabs` publishes stable metadata for every open tab across saved and adopted Sessions. Startup discovery reads the layout keys without mounting dormant content, pinning files or activating Agents. Adopted stores replace their own metadata on membership commits, and permanently cleared scopes remove it. Other windows' storage writes do not overwrite this window's live membership. Providers use this inventory to restore their own resource lifetimes.
 
+`sidebarRight.selected` publishes the active tab identity of the mounted Session and becomes `undefined` when the panel is hidden or its seat is released. It changes with committed focus and layout updates; consumers must still check the tab kind and page state before using it.
+
 <a id="extension-seats"></a>
 ## Extension seats
 

@@ -72,6 +72,8 @@ Desktop 主进程批准 guest 租约，并执行挂载、导航和权限策略�
 
 页面刷新快捷键调用工具栏使用的同一重载操作。其 Tooltip 和 ARIA 组合随有效绑定更新。Desktop 通过所属窗口路由已批准 guest 中的有效快捷键；获焦 webview 必须仍持有该 guest 的租约。Web 保留浏览器专用组合。
 
+另行安装 Computer Use 插件后，Desktop Browser 只向已认证的本机 Host 路由报告已挂载 Session 的活动标签。精确来源网站获准后，guest 才会发送顶层文档及嵌套同源 iframe 的正文、可交互元素的可访问性标签，以及有大小上限的可见区域或整页 PNG；点击、输入、粘贴、替换输入框内容、选择文本、使用已列出的次要动作、按下有界组合键和关闭已选标签每次都需用户确认。导航到规范 HTTP(S) 网址前须获得原网站和目标网站许可。后退与前进使用原生历史记录；目标网站或重定向后的实际网站获准后才向代理返回其网址或标题。切换焦点、关闭、卸载或导航会撤销待完成的读取和截图；切换标签也会撤销正在进行的导航结果。
+
 </details>
 
 -----
@@ -89,13 +91,21 @@ Desktop 主进程批准 guest 租约，并执行挂载、导航和权限策略�
 <a id="model-experience"></a>
 ## 模型体验
 
-无。Browser tab 是用户侧呈现状态，不注册工具、prompt section 或 Session event。
+无，因为 Browser 标签本身不注册工具或 prompt；另行安装的 Computer Use 插件会把获准的网页观察作为自己的工具结果记录。
 
 #### KV Cache 影响
 
-无；浏览内容不进入模型请求。
+Browser 包不增加 prompt 内容。Computer Use 返回的获准观察以普通、已记录的工具结果进入模型。
 
 ## 已知限制与延期工作
+
+当前源码的 0.1.7-rc.1 Desktop 与 Host 已通过私有端到端测试：Computer Use 从一个真实选中的侧栏 webview 读取文字和可访问性信息，以 CSS、角色、文本、标签、占位符和测试 ID 查询，随后点击普通 div、点击同源 frame 内元素并按标签填写；四次操作各经一次性确认。侧栏支持 getByRole、locator(CSS)、getByText、getByLabel、getByPlaceholder、getByTestId 和显式同源 frameLocator(CSS)，以及计数、首/末/指定位置、点击、双击、填入、按键和输入。每次查询最多扫描顶层或选中 frame 的 10 万个元素，只返回匹配总数和至多一个经指纹复核的引用。链式过滤、正则、任意 DOM 读取、跨源 frame 和完整 Playwright 语义仍不可用。用户正式安装的 0.1.7-rc.2 应用尚未包含这些本地侧栏桥接改动；移植到 rc.2 和已安装应用验收仍待完成。
+
+当前选中标签的 `drag(from,to)` 需要先获逐站许可，再逐次确认。Client 检查视口路径，并向同一个 webview 发送有界的原生鼠标序列。Desktop 只截取该 guest 发起的拖放数据，再向同一个 guest 发送固定的 Chromium 进入、经过和投放命令；导航、切换标签或命令失败会取消短期租约。`dropDispatched` 区分 Chromium 已发送 HTML 投放与仅完成指针拖动，不表示网页已接受投放。隔离 Electron 夹具在这条路径上收到可信的 `dragstart` 和 `drop` 事件。已安装 Desktop 会话尚未完成端到端验收。
+
+Computer Use 读取 Desktop 顶层文档和嵌套同源 iframe，并可截取或裁剪可见区域或整页。frame 引用包含逐层网址和文档修订标记，最多八层。整页截图由主进程执行固定的 Chromium 命令，将 Retina 输出归一到 CSS 像素；页面内容限制在 1600 万像素以内，PNG 限 4 MiB。选中侧栏标签的引用或坐标点击、文本输入、有界组合键和滚动经 Electron webview 输入接口执行，前提是 Host 已批准且页面身份复核通过。`typeText(null,text)` 可在当前聚焦的可编辑元素（包括同源 frame）输入；发送前复核焦点仍在原元素，密码框、禁用或只读目标拒绝。`paste()` 支持普通文本、Markdown 源文本和富 HTML，可向当前聚焦的可编辑元素粘贴。Desktop 为精确归属的 guest 临时写入共享剪贴板，调用 webview 原生粘贴并要求可信输入回执；只有剪贴板仍是本次暂存内容时才还原所有原格式，废弃租约在 15 秒后自动清理。`setValue()` 先选中旧内容，再经原生文本插入或 Backspace 替换可用、可写的 text/search/URL/tel 输入框及 textarea；其他输入类型会拒绝。`selectText()` 可在获准输入框或引用元素中选择唯一匹配的文字，支持前缀/后缀消歧以及文字前后光标定位；密码输入框拒绝。`performSecondaryAction()` 只接受可访问性结果中已列出的聚焦、显示菜单、展开、折叠、增加和减少动作；原生点击或按键前复核角色及展开状态。选中标签的 `goto()`、`reload()`、后退和前进会等待观察到实际目标页，12 秒后仍未完成则失败；后退与前进要求有可用的原生历史条目。Client 只向 Host 返回实际观察到的网址和标题，供最终网站许可复核。确认后的 `close()` 只移除仍选中的标签，并撤销旧句柄。跨来源 iframe 无法读取或定向操作；若截图前后发现跨来源 frame，或整页截图期间 frame 发生变化，则不返回图像。隔离 Electron webview 夹具已验证整页截图，以及可信点击、文本、按键和粘贴输入，包含富 HTML 和剪贴板恢复；选中 Sidebar 标签到 Host 的完整链路及复杂真实网页尚未验收。此处尚不提供完整 Playwright API。
+
+Computer Use 会在选中标签的原生操作前建立短期调试租约，使 `alert`、`confirm`、`prompt` 或 `beforeunload` 能先返回不透明弹窗句柄，而不阻塞 Host 命令。Electron 44 没有原生网页 `prompt()`，因此受 sandbox 约束的 guest preload 在顶层文档的网页脚本运行前替换这个函数：同步调用暂停网页，直到归属同一 guest 的有效租约收到 `accept()` 或 `dismiss()`；提示语和默认值留在 guest 内。确认但不提供文字会采用网页默认值，取消或租约关闭会返回 `null`。代理操作之外没有有效租约的 prompt 直接返回 `null`。子 frame 不会加载这个 preload，因此其 `prompt()` 尚未覆盖。`getJsDialog()` 只读取弹窗类型和不透明句柄；处理仍须单次确认。代理发起的 `goto()`、重载、后退和前进走 guest 隔离脚本世界里的固定、绑定租约的导航命令，使网页无法替换命令，并能捕获已获用户激活页面的 `beforeunload`。确认后等待实际到达的网址；取消则保留原网址。切换标签、无关导航、关闭或长时间不处理会释放调试器并取消弹窗。隔离 Electron、Client 与已认证 Host 桥接夹具覆盖了这些路径；正式安装的 DSH 会话仍未验收。
 
 <a id="known-limitations-and-deferred-work"></a>
 
