@@ -82,6 +82,12 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     return this.page.frame.inspect(expectedUrl)
   }
 
+  /**
+   * Query the approved selected document with a bounded locator.
+   * @param expectedUrl - Exact observed URL approved by the Host.
+   * @param query - Selector steps and optional one-field projection.
+   * @returns Match count and at most one document-bound element reference.
+   */
   locate(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult> {
     if (this.disposed || this.page.frame.locate === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     return this.page.frame.locate(expectedUrl, query)
@@ -114,15 +120,34 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     return this.page.frame.action(expectedUrl, action, stillSelected)
   }
 
+  /**
+   * Read a pending modal on the same approved guest without disclosing its page text.
+   * @param expectedUrl - Exact observed URL approved by the Host.
+   * @param stillSelected - Rejects a changed Sidebar selection.
+   * @returns Modal type and opaque handle, or no pending modal.
+   */
   dialog(expectedUrl: string, stillSelected: () => boolean): Promise<BrowserDialogState> {
     if (this.disposed || this.page.frame.dialog === undefined) throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
     return this.page.frame.dialog(expectedUrl, stillSelected)
   }
 
+  /**
+   * Identify the still-pending modal's approved page without reading its content.
+   * @returns The observed URL bound to the modal, if one remains.
+   */
   pendingDialogUrl(): string | undefined {
     return this.disposed ? undefined : this.page.frame.pendingDialogUrl?.()
   }
 
+  /**
+   * Answer one pending modal while its guest and approved URL remain selected.
+   * @param expectedUrl - Exact observed URL approved by the Host.
+   * @param dialogId - Opaque handle returned for this guest's pending modal.
+   * @param action - Accept or dismiss the modal.
+   * @param text - Replacement text for a prompt acceptance, when provided.
+   * @param stillSelected - Rejects a changed Sidebar selection.
+   * @returns Acknowledgement or a newly pending modal.
+   */
   handleDialog(expectedUrl: string, dialogId: string, action: 'accept' | 'dismiss',
     text: string | undefined, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
     if (this.disposed || this.page.frame.handleDialog === undefined) throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
@@ -146,7 +171,13 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     return this.awaitSelectedNavigation(expectedUrl, stillSelected, () => { this.loadUrl(destination) })
   }
 
-  /** Move through existing native history, disclosing the destination only after Host site approval. */
+  /**
+   * Move through existing native history while the same Sidebar guest remains selected.
+   * @param expectedUrl - Exact currently observed URL approved by the Host.
+   * @param direction - Backward or forward through that guest's history.
+   * @param stillSelected - Rejects navigation after the user switches or closes the tab.
+   * @returns Destination URL and title; the Host checks its site grant before release.
+   */
   navigateHistory(expectedUrl: string, direction: 'back' | 'forward',
     stillSelected: () => boolean): Promise<BrowserDomDialogResult> {
     const initial = this.store.getSnapshot().frame
@@ -169,38 +200,37 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     if (this.disposed || initial.address !== 'observed' || initial.loading ||
       initial.target?.url !== expectedUrl || !stillSelected()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     return new Promise((resolve, reject) => {
-      let unsubscribe = (): void => {}
       let settled = false
       let started = false
-      const finish = (error?: Error, value?: BrowserDomActionResult): void => {
+      const finish = (outcome: { readonly error: Error } | { readonly value: BrowserDomActionResult }): void => {
         if (settled) return
         settled = true
         unsubscribe()
         clearInterval(selectionCheck)
         clearTimeout(timeout)
         this.options.signal.removeEventListener('abort', onAbort)
-        if (error !== undefined) reject(error)
-        else if (value !== undefined) resolve(value)
+        if ('error' in outcome) reject(outcome.error)
+        else resolve(outcome.value)
       }
       const check = (): void => {
-        if (this.disposed || !stillSelected()) { finish(new Error('SIDEBAR_SELECTION_CHANGED')); return }
+        if (this.disposed || !stillSelected()) { finish({ error: new Error('SIDEBAR_SELECTION_CHANGED') }); return }
         const state = this.store.getSnapshot()
         if (state.frame.loading || state.frame.address === 'requested') started = true
         if (state.addressFailure !== undefined || state.frame.error !== undefined ||
           state.frame.address === 'unknown' && !state.frame.loading) {
-          finish(new Error('SIDEBAR_NAVIGATION_FAILED')); return
+          finish({ error: new Error('SIDEBAR_NAVIGATION_FAILED') }); return
         }
         if (started && state.frame.address === 'observed' && !state.frame.loading && state.frame.target !== undefined) {
-          finish(undefined, { url: state.frame.target.url, title: state.frame.target.title.slice(0, 512), performed: true })
+          finish({ value: { url: state.frame.target.url, title: state.frame.target.title.slice(0, 512), performed: true } })
         }
       }
-      const onAbort = (): void => { finish(new Error('SIDEBAR_TAB_UNAVAILABLE')) }
-      const timeout = setTimeout(() => { finish(new Error('SIDEBAR_NAVIGATION_TIMEOUT')) }, 12_000)
+      const onAbort = (): void => { finish({ error: new Error('SIDEBAR_TAB_UNAVAILABLE') }) }
+      const timeout = setTimeout(() => { finish({ error: new Error('SIDEBAR_NAVIGATION_TIMEOUT') }) }, 12_000)
       const selectionCheck = setInterval(check, 50)
       this.options.signal.addEventListener('abort', onAbort, { once: true })
-      unsubscribe = this.subscribe(check)
+      const unsubscribe = this.subscribe(check)
       try { start(); check() }
-      catch (error) { finish(error instanceof Error ? error : new Error('SIDEBAR_NAVIGATION_FAILED')) }
+      catch (error) { finish({ error: error instanceof Error ? error : new Error('SIDEBAR_NAVIGATION_FAILED') }) }
     })
   }
 

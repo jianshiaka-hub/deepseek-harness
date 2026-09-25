@@ -4,6 +4,11 @@ import { runInNewContext } from 'node:vm'
 import { expect, it, vi } from 'vitest'
 import { electronFixture } from './electron-harness.client.ts'
 
+function runGuestScript(code: string, context: Record<string, unknown>): unknown {
+  const result: unknown = runInNewContext(code, context)
+  return result
+}
+
 it('reads top-level text and refs, acts on a matching ref, and refuses navigation or stale refs', async () => {
   const h = electronFixture()
   const button = document.createElement('button')
@@ -260,10 +265,10 @@ it('selects one exact text match or cursor position in the selected document', a
     guest.state.url = url
     guest.state.title = 'Example'
     guest.state.loading = false
-    const evaluate = vi.fn(async (code: string) => runInNewContext(code, {
+    const evaluate = vi.fn(async (code: string) => runGuestScript(code, {
       location: { href: url, origin: 'https://example.test' }, document, URL,
       innerWidth: 800, innerHeight: 600, HTMLInputElement, HTMLTextAreaElement,
-    }) as unknown)
+    }))
     Object.assign(guest.element, { executeJavaScript: evaluate })
     guest.emit('dom-ready')
     guest.emit('did-navigate')
@@ -326,10 +331,10 @@ it('performs only exposed fixed secondary actions against a stable element', asy
     guest.state.url = url
     guest.state.title = 'Example'
     guest.state.loading = false
-    const evaluate = vi.fn(async (code: string) => runInNewContext(code, {
+    const evaluate = vi.fn(async (code: string) => runGuestScript(code, {
       location: { href: url, origin: 'https://example.test' }, document, URL,
       innerWidth: 800, innerHeight: 600,
-    }) as unknown)
+    }))
     const nativeInput = vi.fn(async (event: { type: string; button?: string }) => {
       if (event.type === 'mouseUp' && event.button === 'left') {
         button.setAttribute('aria-expanded', button.getAttribute('aria-expanded') === 'true' ? 'false' : 'true')
@@ -399,10 +404,10 @@ it('pastes rich content through the leased clipboard and restores it after a tru
     guest.state.url = url
     guest.state.title = 'Example'
     guest.state.loading = false
-    const evaluate = vi.fn(async (code: string) => runInNewContext(code, {
+    const evaluate = vi.fn(async (code: string) => runGuestScript(code, {
       location: { href: url, origin: 'https://example.test' }, document, URL, window: guestWindow,
       innerWidth: 800, innerHeight: 600,
-    }) as unknown)
+    }))
     const paste = vi.fn(() => {
       const key = Object.getOwnPropertyNames(guestWindow).find(value => value.startsWith('__dsh_cu_paste_'))
       const receipt = guestWindow[key ?? ''] as
@@ -484,10 +489,10 @@ it('drags along a checked native pointer path and releases the button if selecti
     guest.state.url = url
     guest.state.title = 'Example'
     guest.state.loading = false
-    const evaluate = vi.fn(async (code: string) => runInNewContext(code, {
+    const evaluate = vi.fn(async (code: string) => runGuestScript(code, {
       location: { href: url, origin: 'https://example.test' }, document, URL,
       innerWidth: 300, innerHeight: 200,
-    }) as unknown)
+    }))
     const events: { type: string; x: number; y: number }[] = []
     let selected = true
     let stopAfterMove = false
@@ -544,9 +549,9 @@ it('captures the selected guest viewport and discards an image if navigation sta
       toDataURL: () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' }
     const capturePage = vi.fn(async () => picture)
     Object.assign(guest.element, { capturePage,
-      executeJavaScript: async (code: string) => runInNewContext(code, {
+      executeJavaScript: async (code: string) => runGuestScript(code, {
         location: { href: url, origin: 'https://example.test' }, document, URL,
-      }) as unknown })
+      }) })
     expect(await h.frame.screenshot?.(url)).toEqual({ url, title: 'Example',
       base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', viewport: { width: 1, height: 1 } })
     expect(await h.frame.screenshot?.(url, { x: 0, y: 0, width: 1, height: 1 })).toMatchObject({
@@ -609,9 +614,9 @@ it('routes full-page capture through the owning lease and rechecks frame origins
     guest.state.loading = false
     guest.emit('dom-ready')
     guest.emit('did-navigate')
-    Object.assign(guest.element, { executeJavaScript: async (code: string) => runInNewContext(code, {
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
       location: { href: url, origin: 'https://example.test' }, document, URL,
-    }) as unknown })
+    }) })
     const clip = { x: 0, y: 0, width: 1, height: 1 }
     expect(await h.frame.screenshot?.(url, clip, true)).toMatchObject({ url, viewport: { width: 1, height: 1 } })
     expect(h.bridge.captureFullPage).toHaveBeenCalledWith(h.reservation.lease, url, clip)

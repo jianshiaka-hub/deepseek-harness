@@ -23,7 +23,7 @@ function fixture() {
     isDestroyed: () => state.destroyed,
     isLoadingMainFrame: () => state.loading,
     getURL: () => state.url,
-  }) as unknown as Parameters<BrowserDialogLease['begin']>[0]
+  }) as Parameters<BrowserDialogLease['begin']>[0]
   const open = (type: string, source = url): void => {
     debuggerEvents.emit('message', undefined, 'Page.javascriptDialogOpening', { type, url: source, message: 'Private page text' })
   }

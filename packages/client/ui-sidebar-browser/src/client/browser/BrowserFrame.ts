@@ -107,6 +107,7 @@ export interface BrowserDialogState {
   readonly dialog: BrowserJsDialog | null
 }
 
+/** One bounded selector and optional local filter over the approved document. */
 export interface BrowserLocateSelector {
   readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByTestId'
   readonly value: string
@@ -121,6 +122,7 @@ export interface BrowserLocateSelector {
   }
 }
 
+/** A selector chain within the top document or explicit same-origin frames. */
 export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly frames?: readonly string[]
   readonly scopes?: readonly BrowserLocateSelector[]
@@ -129,6 +131,7 @@ export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
 }
 
+/** Count of matches and at most one document-bound reference or requested state. */
 export interface BrowserLocateResult {
   readonly url: string
   readonly title: string

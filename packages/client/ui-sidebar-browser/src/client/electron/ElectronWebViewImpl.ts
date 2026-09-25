@@ -65,6 +65,7 @@ function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true)
     (query.projection === undefined || ['visible', 'enabled', 'checked', 'text'].includes(query.projection)) &&
     (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
       query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Query arrives as Host RPC JSON, which may contain null.
     (query.position === undefined || query.position !== null &&
       ['first', 'last', 'nth'].includes(query.position.method) &&
       (query.position.method === 'nth'
@@ -74,6 +75,7 @@ function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true)
     (query.frames === undefined || Array.isArray(query.frames) && query.frames.length >= 1 &&
       query.frames.length <= 8 && query.frames.every(frame => typeof frame === 'string' &&
         frame.trim().length > 0 && frame.length <= 256)) &&
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Host RPC JSON can violate this TypeScript interface.
     (query.combine === undefined || allowCombine && query.combine !== null &&
       typeof query.combine === 'object' && !Array.isArray(query.combine) &&
       Object.keys(query.combine).length === 2 &&
