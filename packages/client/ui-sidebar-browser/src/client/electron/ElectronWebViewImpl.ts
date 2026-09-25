@@ -920,7 +920,12 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeType(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'type' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
-    if (action.text.length > 4000) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+    if (action.text.length > 4000 || action.sequential === true &&
+      (action.text.length === 0 || new TextEncoder().encode(action.text).length > 1024 ||
+        Array.from(action.text).length > 256 ||
+        Array.from(action.text).some(char => /[\p{Cc}\p{Cs}]/u.test(char)))) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+    }
     const receipt = `__dsh_cu_type_${randomUUID().replaceAll('-', '')}`
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
@@ -956,7 +961,8 @@ export class ElectronWebViewImpl implements BrowserFrame {
       if (typeof focused !== 'object' || focused === null || !('url' in focused) || focused.url !== expectedUrl ||
         !('title' in focused) || typeof focused.title !== 'string' ||
         !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
-      await element.executeJavaScript(`(() => {
+      const verify = async (): Promise<void> => {
+        await element.executeJavaScript(`(() => {
         if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
         ${guestDomHelpers}
         const state = window[${JSON.stringify(receipt)}];
@@ -971,8 +977,28 @@ export class ElectronWebViewImpl implements BrowserFrame {
           throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
         }
       })()`)
-      if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
-      await element.insertText(action.text)
+        if (!this.inputStillSelected(element, expectedUrl, stillSelected)) {
+          throw new Error('SIDEBAR_SELECTION_CHANGED')
+        }
+      }
+      await verify()
+      if (action.sequential === true) {
+        for (const char of action.text) {
+          await verify()
+          const modifiers: SidebarKeyModifier[] = /[A-Z~!@#$%^&*()_+{}|:"<>?]/u.test(char) ? ['shift'] : []
+          const keyboard = { keyCode: char, modifiers }
+          let down = false
+          try {
+            await element.sendInputEvent({ type: 'keyDown', ...keyboard })
+            down = true
+            await verify()
+            await element.sendInputEvent({ type: 'char', ...keyboard })
+          } finally {
+            if (down) await element.sendInputEvent({ type: 'keyUp', ...keyboard }).catch(() => {})
+          }
+          await verify()
+        }
+      } else await element.insertText(action.text)
       if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
       return { url: expectedUrl, title: focused.title, performed: true }
     } finally {

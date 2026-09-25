@@ -51,6 +51,7 @@ interface Command {
     readonly button?: 'left' | 'middle' | 'right'
     readonly count?: number
     readonly text?: string
+    readonly sequential?: true
     readonly format?: 'text' | 'md' | 'html'
     readonly value?: string
     readonly options?: readonly { readonly value?: string; readonly label?: string; readonly index?: number }[]

@@ -35,7 +35,7 @@ export interface WebviewElement extends HTMLElement {
     hasPreciseScrollingDeltas?: boolean
     canScroll?: boolean
   } | {
-    type: 'keyDown' | 'keyUp'
+    type: 'keyDown' | 'char' | 'keyUp'
     keyCode: string
     modifiers?: Array<'shift' | 'control' | 'alt' | 'meta'>
   }): Promise<void>

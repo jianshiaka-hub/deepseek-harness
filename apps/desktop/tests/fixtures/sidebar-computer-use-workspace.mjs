@@ -230,6 +230,22 @@ async function qualify() {
     await waitFor(() => window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
         .executeJavaScript('window.scrollY > 0')`), 'selected Browser page scroll', 5000)
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('window.__sequentialEvents=[]; for(const type of ["keydown","input"]) document.getElementById("name").addEventListener(type,event=>window.__sequentialEvents.push({type,data:event.data??null,key:event.key??null,trusted:event.isTrusted}))')`)
+    const sequential = await control('/invoke', { sessionId,
+      code: `await t.playwright.getByLabel('Name',{exact:true}).pressSequentially('A你😀'); return 'SEQUENTIAL';` })
+    await writeFile(join(root, 'computer-use-sequential.json'), JSON.stringify({ sessionId, tool: sequential }, null, 2))
+    assert.equal(sequential.result?.value?.ok, true, JSON.stringify(sequential.result))
+    assert.match(sequential.result.value.result, /SEQUENTIAL/)
+    assert.equal(sequential.approvals.filter(approval => approval.allowed).length, 10)
+    const sequentialState = await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('({value:document.getElementById("name").value,events:window.__sequentialEvents})')`)
+    assert.equal(sequentialState.value, 'AdaA你😀')
+    assert.deepEqual(sequentialState.events.filter(event => event.type === 'input').map(event => event.data), ['A','你','😀'])
+    assert.equal(sequentialState.events.filter(event => event.type === 'keydown' && event.trusted).length, 3)
+    assert.ok(sequentialState.events.every(event => event.trusted))
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {

@@ -157,7 +157,8 @@ export function apply(ctx: Context): void {
         if (command.args.text === undefined) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,
           { op: 'type', ...(command.args.ref === undefined ? {} : { ref: command.args.ref }),
-            text: command.args.text }, stillSelected)
+            text: command.args.text,
+            ...(command.args.sequential === true ? { sequential: true as const } : {}) }, stillSelected)
       }
       if (command.args.ref === undefined) throw new Error('SIDEBAR_UNKNOWN_REF')
       if (command.op === 'setValue') {
