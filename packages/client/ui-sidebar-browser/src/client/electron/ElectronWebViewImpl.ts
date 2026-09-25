@@ -846,6 +846,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
       !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
       throw new Error('SIDEBAR_SELECTION_CHANGED')
     }
+    if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== selected.fingerprint ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
     if (action.value.length > 0) {
       await element.insertText(action.value)
     } else if (refreshed.hadText) {
@@ -1247,6 +1251,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
       moved.fingerprint !== point.fingerprint || moved.x !== point.x || moved.y !== point.y ||
       !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
       throw new Error('SIDEBAR_TARGET_MOVED')
+    }
+    if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== point.fingerprint ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_NAVIGATED')
     }
     let pressed = false
     try {
