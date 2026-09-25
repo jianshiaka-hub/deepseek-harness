@@ -178,7 +178,9 @@ export function apply(ctx: Context): void {
       if (command.op === 'selectOption') {
         if (command.args.options === undefined) throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,
-          { op: 'selectOption', ref: command.args.ref, options: command.args.options }, stillSelected)
+          { op: 'selectOption', ref: command.args.ref, options: command.args.options,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'selectText') {
         if (command.args.text === undefined) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')

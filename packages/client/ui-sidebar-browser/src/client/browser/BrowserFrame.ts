@@ -67,7 +67,12 @@ export type BrowserDomAction =
     readonly value: string
     readonly approvedFrameOrigins?: readonly string[]
   }
-  | { readonly op: 'selectOption'; readonly ref: string; readonly options: readonly BrowserOptionSelector[] }
+  | {
+    readonly op: 'selectOption'
+    readonly ref: string
+    readonly options: readonly BrowserOptionSelector[]
+    readonly approvedFrameOrigins?: readonly string[]
+  }
   | {
     readonly op: 'selectText'
     readonly ref: string

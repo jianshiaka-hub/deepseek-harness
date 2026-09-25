@@ -112,6 +112,22 @@ export interface BrowserForeignInputState {
   readonly hadText: boolean
 }
 
+/** Bounded result of selecting options in one approved foreign select element. */
+export interface BrowserForeignOptionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly selected: readonly string[]
+}
+
+/** Bounded matcher for a single HTML option. */
+export interface BrowserForeignOptionSelector {
+  readonly value?: string
+  readonly label?: string
+  readonly index?: number
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -148,6 +164,10 @@ export interface DesktopBrowserBridge {
   foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify' | 'focus' | 'check',
     value?: string): Promise<BrowserForeignInputState>
+  /** Select unique enabled options in one approved foreign select element. */
+  selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    options: readonly BrowserForeignOptionSelector[]): Promise<BrowserForeignOptionResult>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>

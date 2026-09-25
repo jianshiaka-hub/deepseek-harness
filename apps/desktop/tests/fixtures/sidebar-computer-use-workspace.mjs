@@ -392,6 +392,20 @@ async function qualify() {
       'Foreign-frame sequential typing needs one-use action confirmation')
     assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
       'A你😀', 'trusted character events should update the actual foreign document')
+    const crossOption = await control('/invoke', { sessionId,
+      code: `return 'FOREIGN_OPTION_' + (await t.playwright.frameLocator('#foreign').getByRole('combobox',{name:'Foreign color',exact:true}).selectOption('blue')).join('_');` })
+    await writeFile(join(root, 'computer-use-cross-origin-option.json'),
+      JSON.stringify({ sessionId, tool: crossOption }, null, 2))
+    assert.equal(crossOption.result?.isError, false, JSON.stringify(crossOption.result))
+    assert.equal(crossOption.result?.value?.ok, true, JSON.stringify(crossOption.result))
+    assert.match(crossOption.result.value.result, /FOREIGN_OPTION_blue/)
+    assert.equal(crossOption.approvals.filter(approval => approval.allowed).length,
+      crossSequential.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame selectOption needs one-use action confirmation')
+    assert.equal(await foreignFrame.executeJavaScript('document.querySelector("select[aria-label=\\"Foreign color\\"]").value'),
+      'blue', 'the actual foreign select should hold the chosen option')
+    assert.equal(await foreignFrame.executeJavaScript('document.getElementById("foreignColorResult").textContent'),
+      'blue', 'foreign change listener should observe the selected option')
     const rejectedFill = await control('/invoke', { sessionId,
       code: `let passwordRejected = false, lockedRejected = false; try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign secret',exact:true}).fill('blocked'); } catch (error) { passwordRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign locked',exact:true}).fill('blocked'); } catch (error) { lockedRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } if(!passwordRejected || !lockedRejected) throw Error('FOREIGN_INPUT_GATE_FAILED'); return 'FOREIGN_INPUT_GATES_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-fill-denied.json'),

@@ -928,6 +928,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       spec.index !== undefined && (!Number.isSafeInteger(spec.index) || spec.index < 0 || spec.index > 999))) {
       throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
     }
+    if (action.ref.startsWith('x')) return this.nativeForeignSelectOption(element, expectedUrl, action, stillSelected)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -969,6 +970,22 @@ export class ElectronWebViewImpl implements BrowserFrame {
       !('selected' in result) || !Array.isArray(result.selected) ||
       result.selected.length > 20 || result.selected.some(value => typeof value !== 'string' || value.length > 120) ||
       !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED')
+    return { url: expectedUrl, title: result.title, performed: true, selected: result.selected }
+  }
+
+  private async nativeForeignSelectOption(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'selectOption' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || approved === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
+    const result = await this.bridge.selectForeignOption(lease, expectedUrl, action.ref, approved, action.options)
+    if (result.url !== expectedUrl || !approved.includes(result.origin) ||
+      result.selected.length > 20 || result.selected.some(value => value.length > 120) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED')
+    }
     return { url: expectedUrl, title: result.title, performed: true, selected: result.selected }
   }
 
