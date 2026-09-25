@@ -60,6 +60,40 @@ it('bounds multi-step relative has filters to descendants of each candidate', as
   }
 })
 
+it('locates image alternative text and title attributes without matching unrelated alt attributes', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<img alt="Playwright logo"><area alt="Map area"><input type="image" alt="Submit image">' +
+    '<span title="Issues count">25</span><div alt="Playwright logo">Unrelated</div>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    for (const [method, value, exact, count] of [
+      ['getByAltText', 'logo', false, 1], ['getByAltText', 'Playwright logo', true, 1],
+      ['getByAltText', 'playwright logo', true, 0], ['getByAltText', 'Map area', true, 1],
+      ['getByAltText', 'Submit image', true, 1], ['getByTitle', 'Issues', false, 1],
+      ['getByTitle', 'Issues count', true, 1], ['getByTitle', 'issues count', true, 0],
+    ] as const) {
+      expect((await h.frame.locate?.(url, { method, value, exact }))?.count).toBe(count)
+    }
+    expect((await h.frame.locate?.(url, { method: 'getByRole', value: 'img', exact: true,
+      name: 'Playwright logo' }))?.count).toBe(1)
+    expect((await h.frame.locate?.(url, { method: 'getByAltText', value: 'logo', exact: false }))?.rows[0]?.name)
+      .toBe('Playwright logo')
+  } finally { await h.dispose(); fixture.remove() }
+})
+
 it('reads top-level text and refs, acts on a matching ref, and refuses navigation or stale refs', async () => {
   const h = electronFixture()
   const button = document.createElement('button')

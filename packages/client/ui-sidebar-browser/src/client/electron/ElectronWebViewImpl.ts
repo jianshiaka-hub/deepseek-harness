@@ -44,7 +44,7 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
   const selector = value as Record<string, unknown>
   const filter = selector.filter
   return typeof selector.method === 'string' &&
-    ['getByRole', 'locator', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByTestId'].includes(selector.method) &&
+    ['getByRole', 'locator', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByAltText', 'getByTitle', 'getByTestId'].includes(selector.method) &&
     Object.keys(selector).every(key => ['method', 'value', 'name', 'exact', 'filter', ...extraKeys].includes(key)) &&
     typeof selector.value === 'string' && selector.value.trim().length > 0 &&
     selector.value.length <= (selector.method === 'locator' ? 256 : 120) &&
@@ -93,7 +93,7 @@ function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true)
 
 /** Executed inside the guest; frame DOM is included only when the browser itself grants same-origin access. */
 const guestDomHelpers = String.raw`
-  const sidebarSelector = 'a,button,input,textarea,select,[role],[contenteditable],h1,h2,h3';
+  const sidebarSelector = 'a,button,input,textarea,select,img[alt],area[alt],[role],[contenteditable],h1,h2,h3';
   const sidebarFrames = (doc = document) => [...doc.querySelectorAll('iframe,frame')].slice(0, 100);
   const sidebarFrameDocument = (frame) => {
     try {
@@ -138,10 +138,11 @@ const guestDomHelpers = String.raw`
   const sidebarDescribe = (node) => {
     const rawRole = node.getAttribute('role') || '';
     const role = /^[a-z][a-z0-9-]{0,31}$/.test(rawRole) ? rawRole :
-      node.tagName === 'INPUT' ? ({number:'spinbutton',range:'slider',checkbox:'checkbox',radio:'radio'})[node.type] || 'textbox' :
-      ({A:'link',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
+      node.tagName === 'INPUT' ? ({number:'spinbutton',range:'slider',checkbox:'checkbox',radio:'radio',image:'button'})[node.type] || 'textbox' :
+      ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
         (node.getAttribute('contenteditable') !== null ? 'textbox' : node.tagName.toLowerCase());
-    const name = (node.getAttribute('aria-label') || node.innerText || node.getAttribute('placeholder') || '')
+    const name = (node.getAttribute('aria-label') || node.innerText || node.getAttribute('alt') ||
+      node.getAttribute('title') || node.getAttribute('placeholder') || '')
       .trim().replace(/\s+/g, ' ').replaceAll('[ref=', '[ref =').slice(0, 60);
     return {role, name};
   };
@@ -430,6 +431,12 @@ export class ElectronWebViewImpl implements BrowserFrame {
             textMatches(child.innerText || '',selector.value,selector.exact));
         }
         else if (selector.method === 'getByPlaceholder') text = node.getAttribute('placeholder') || '';
+        else if (selector.method === 'getByAltText') {
+          if (node.tagName !== 'IMG' && node.tagName !== 'AREA' &&
+            !(node.tagName === 'INPUT' && node.type === 'image')) return false;
+          text = node.getAttribute('alt') || '';
+        }
+        else if (selector.method === 'getByTitle') text = node.getAttribute('title') || '';
         else if (selector.method === 'getByLabel') {
           const labels = node.labels ? [...node.labels].map(label => label.innerText) : [];
           const labelledBy = (node.getAttribute('aria-labelledby') || '').split(/\\s+/)

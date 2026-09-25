@@ -109,7 +109,7 @@ export interface BrowserDialogState {
 
 /** One bounded selector and optional local filter over the approved document. */
 export interface BrowserLocateSelector {
-  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByTestId'
+  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
   readonly value: string
   readonly name?: string
   readonly exact: boolean

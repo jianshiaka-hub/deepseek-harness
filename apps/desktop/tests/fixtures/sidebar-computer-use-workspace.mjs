@@ -129,6 +129,13 @@ async function qualify() {
     assert.match(located.result.value.result, /LOCATORS_1_1_1_1_1_1_0_1_1_0_1_1_0_false_true_false_true_false/)
     assert.equal(located.approvals.filter(approval => approval.allowed).length, 0,
       'Read-only locator queries must not consume action approval')
+    const attribute = await control('/invoke', { sessionId,
+      code: `return 'ATTR_' + [await t.playwright.getByAltText('logo').count(),await t.playwright.getByAltText('Playwright logo',{exact:true}).count(),await t.playwright.getByAltText('playwright logo',{exact:true}).count(),await t.playwright.getByRole('img',{name:'Playwright logo',exact:true}).count(),await t.playwright.getByTitle('Issues').count(),await t.playwright.getByTitle('Issues count',{exact:true}).count(),await t.playwright.getByTitle('issues count',{exact:true}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-attribute-locate.json'), JSON.stringify({ sessionId, tool: attribute }, null, 2))
+    assert.equal(attribute.result?.isError, false, JSON.stringify(attribute.result))
+    assert.equal(attribute.result?.value?.ok, true, JSON.stringify(attribute.result))
+    assert.match(attribute.result.value.result, /ATTR_1_1_0_1_1_1_0/)
+    assert.equal(attribute.approvals.filter(approval => approval.allowed).length, 0)
     const visible = await control('/invoke', { sessionId,
       code: `return 'VISIBILITY_' + [await t.playwright.locator('#hidden').filter({visible:false}).count(),await t.playwright.locator('#hidden').filter({visible:true}).count(),await t.playwright.locator('#action').filter({visible:true}).count()].join('_');` })
     await writeFile(join(root, 'computer-use-visible-filter.json'), JSON.stringify({ sessionId, tool: visible }, null, 2))

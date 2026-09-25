@@ -11,7 +11,7 @@ import { JSDOM } from 'jsdom'
 
 const pluginDirectory = process.env.DSH_COMPUTER_USE_PLUGIN_DIR
 if (!pluginDirectory) throw new Error('Set DSH_COMPUTER_USE_PLUGIN_DIR to the Computer Use plugin checkout')
-const page = new JSDOM('<!doctype html><title>Fallback</title><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div>', { url: 'https://example.test/' })
+const page = new JSDOM('<!doctype html><title>Fallback</title><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div><img alt="Playwright logo"><span title="Issues count">25</span><div alt="Playwright logo">Unrelated alt</div>', { url: 'https://example.test/' })
 for (const node of page.window.document.querySelectorAll('.inner')) {
   Object.defineProperty(node, 'innerText', { value: 'Shared', configurable: true })
 }
@@ -22,6 +22,12 @@ const queries = [
   { method: 'getByTestId', value: 'group-a', exact: false, filter: { has: relative } },
   { method: 'getByTestId', value: 'group-b', exact: false, filter: { has: relative } },
   { method: 'getByTestId', value: 'group-b', exact: false, filter: { hasNot: relative } },
+  { method: 'getByAltText', value: 'logo', exact: false },
+  { method: 'getByAltText', value: 'Playwright logo', exact: true },
+  { method: 'getByAltText', value: 'playwright logo', exact: true },
+  { method: 'getByRole', value: 'img', name: 'Playwright logo', exact: true },
+  { method: 'getByTitle', value: 'Issues', exact: false },
+  { method: 'getByTitle', value: 'issues count', exact: true },
 ]
 const commands = queries.map((query, index) => ({
   id: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}`, sessionId: 'session-a', tabId: 'tab-a',
@@ -65,13 +71,13 @@ try {
     sidebarRight: { mounted: { getSnapshot: () => 'session-a', subscribe: () => () => {} },
       openTabs: { getSnapshot: () => [{ sessionId: 'session-a', tabId: 'tab-a', kind: 'browser' }],
         subscribe: () => () => {} } }, effect: callback => { dispose = callback() } })
-  for (let attempt = 0; attempt < 100 && completions.length < 3; attempt++) {
+  for (let attempt = 0; attempt < 100 && completions.length < queries.length; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 2))
   }
-  assert.equal(completions.length, 3, 'all selected-tab fallback queries completed')
+  assert.equal(completions.length, queries.length, 'all selected-tab fallback queries completed')
   assert.ok(completions.every(result => result.ok), JSON.stringify(completions.map(result => result.error)))
-  assert.deepEqual(completions.map(result => result.value.count), [1, 0, 1])
-  process.stdout.write('Official-shell plugin fallback relative locator PASS: 1/0/1\n')
+  assert.deepEqual(completions.map(result => result.value.count), [1, 0, 1, 1, 1, 0, 1, 1, 0])
+  process.stdout.write('Official-shell plugin fallback locators PASS: relative 1/0/1, attributes 1/1/0/1/1/0\n')
 } finally {
   await dispose?.()
   page.window.close()
