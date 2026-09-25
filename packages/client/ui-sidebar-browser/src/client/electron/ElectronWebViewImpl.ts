@@ -54,7 +54,7 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
     (filter === undefined || filter !== null && typeof filter === 'object' &&
       !Array.isArray(filter) && Object.keys(filter).length > 0 &&
       Object.entries(filter).every(([key, nested]) =>
-        ['hasText', 'hasNotText'].includes(key)
+        key === 'visible' ? typeof nested === 'boolean' : ['hasText', 'hasNotText'].includes(key)
           ? typeof nested === 'string' && nested.length > 0 && nested.length <= 120
           : ['has', 'hasNot'].includes(key) && nested !== null && typeof nested === 'object' &&
             !('filter' in nested) && validSidebarLocateSelector(nested)))
@@ -425,11 +425,17 @@ export class ElectronWebViewImpl implements BrowserFrame {
         const text = node.innerText || '';
         return (filter.hasText === undefined || textMatches(text,filter.hasText,false)) &&
           (filter.hasNotText === undefined || !textMatches(text,filter.hasNotText,false)) &&
+          (filter.visible === undefined || isVisible(node) === filter.visible) &&
           (nestedResults[step].has === null || nestedResults[step].has.has(node)) &&
           (nestedResults[step].hasNot === null || !nestedResults[step].hasNot.has(node));
       };
       let doc = document, prefix = '';
       const frameNodes = [];
+      const isVisible = node => [...frameNodes,node].every(element => {
+        const style = element.ownerDocument.defaultView.getComputedStyle(element);
+        return style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+          [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
+      });
       for (const selector of query.frames || []) {
         let frames;
         try { frames = [...doc.querySelectorAll(selector)].filter(node => node.matches('iframe,frame')); }
@@ -485,11 +491,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
         const {role,name} = sidebarDescribe(node);
         return [{ref:prefix + 'd' + index + '-' + sidebarDomFingerprint(doc,node,index)
           + ':' + role + ':' + encodeURIComponent(name),role,name,
-          ...(query.projection === 'visible' ? {visible:[...frameNodes,node].every(element => {
-            const style = element.ownerDocument.defaultView.getComputedStyle(element);
-            return style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
-              [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
-          })} : {}),
+          ...(query.projection === 'visible' ? {visible:isVisible(node)} : {}),
           ...(query.projection === 'enabled' ? {enabled:!node.matches(':disabled') &&
             !node.closest('[aria-disabled="true"],[inert]')} : {}),
           ...(query.projection === 'checked' ? {checked:(() => {

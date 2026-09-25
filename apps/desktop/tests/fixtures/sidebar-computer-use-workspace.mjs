@@ -129,6 +129,12 @@ async function qualify() {
     assert.match(located.result.value.result, /LOCATORS_1_1_1_1_1_1_0_1_1_0_1_1_0_false_true_false_true_false/)
     assert.equal(located.approvals.filter(approval => approval.allowed).length, 0,
       'Read-only locator queries must not consume action approval')
+    const visible = await control('/invoke', { sessionId,
+      code: `return 'VISIBILITY_' + [await t.playwright.locator('#hidden').filter({visible:false}).count(),await t.playwright.locator('#hidden').filter({visible:true}).count(),await t.playwright.locator('#action').filter({visible:true}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-visible-filter.json'), JSON.stringify({ sessionId, tool: visible }, null, 2))
+    assert.equal(visible.result?.isError, false, JSON.stringify(visible.result))
+    assert.match(visible.result?.value?.result ?? '', /VISIBILITY_1_0_1/)
+    assert.equal(visible.approvals.filter(approval => approval.allowed).length, 0)
     const relative = await control('/invoke', { sessionId,
       code: `let section = t.playwright.getByTestId('group-a'); let inner = t.playwright.getByTestId('duplicate'); return 'RELATIVE_' + [await section.filter({has:inner}).count(),await section.filter({hasNot:inner}).count()].join('_');` })
     await writeFile(join(root, 'computer-use-relative-locate.json'), JSON.stringify({ sessionId, tool: relative }, null, 2))

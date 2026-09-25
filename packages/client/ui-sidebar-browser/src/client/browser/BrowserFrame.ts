@@ -115,6 +115,7 @@ export interface BrowserLocateSelector {
   readonly filter?: {
     readonly hasText?: string
     readonly hasNotText?: string
+    readonly visible?: boolean
     readonly has?: Omit<BrowserLocateSelector, 'filter'>
     readonly hasNot?: Omit<BrowserLocateSelector, 'filter'>
   }
