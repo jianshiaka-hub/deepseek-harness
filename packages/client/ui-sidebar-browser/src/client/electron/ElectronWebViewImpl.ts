@@ -796,6 +796,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeSetValue(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'setValue' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.ref.startsWith('x')) return this.nativeForeignSetValue(element, expectedUrl, action, stillSelected)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -824,6 +825,43 @@ export class ElectronWebViewImpl implements BrowserFrame {
       await element.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
     }
     return { url: expectedUrl, title: selected.title, performed: true }
+  }
+
+  private async nativeForeignSetValue(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'setValue' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || approved === undefined || action.value.length > 4000 ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+    const selected = await this.bridge.foreignInputState(lease, expectedUrl, action.ref,
+      approved, 'select')
+    if (selected.url !== expectedUrl || !approved.includes(selected.origin) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    const refreshed = await this.bridge.foreignInputState(lease, expectedUrl, action.ref,
+      approved, 'select')
+    if (refreshed.fingerprint !== selected.fingerprint || refreshed.origin !== selected.origin ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    if (action.value.length > 0) {
+      await element.insertText(action.value)
+    } else if (refreshed.hadText) {
+      await element.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
+      if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+        throw new Error('SIDEBAR_SELECTION_CHANGED')
+      }
+      await element.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+    }
+    const verified = await this.bridge.foreignInputState(lease, expectedUrl, action.ref,
+      approved, 'verify', action.value)
+    if (verified.fingerprint !== selected.fingerprint || verified.origin !== selected.origin ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED')
+    }
+    return { url: expectedUrl, title: verified.title, performed: true }
   }
 
   private async nativeSelectOption(element: WebviewElement, expectedUrl: string,

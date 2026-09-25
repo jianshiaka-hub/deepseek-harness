@@ -55,7 +55,12 @@ export type BrowserDomAction =
     readonly y: number
     readonly to: { readonly x: number; readonly y: number }
   }
-  | { readonly op: 'setValue'; readonly ref: string; readonly value: string }
+  | {
+    readonly op: 'setValue'
+    readonly ref: string
+    readonly value: string
+    readonly approvedFrameOrigins?: readonly string[]
+  }
   | { readonly op: 'selectOption'; readonly ref: string; readonly options: readonly BrowserOptionSelector[] }
   | {
     readonly op: 'selectText'

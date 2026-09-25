@@ -23,6 +23,7 @@ export const DESKTOP_IPC = {
   browserInspectForeignText: 'dsh-desktop:browser-inspect-foreign-text',
   browserLocateForeign: 'dsh-desktop:browser-locate-foreign',
   browserForeignRefPoint: 'dsh-desktop:browser-foreign-ref-point',
+  browserForeignInputState: 'dsh-desktop:browser-foreign-input-state',
   browserCaptureViewport: 'dsh-desktop:browser-capture-viewport',
   browserCaptureFullPage: 'dsh-desktop:browser-capture-full-page',
   browserPasteBegin: 'dsh-desktop:browser-paste-begin',

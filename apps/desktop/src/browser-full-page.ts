@@ -1,6 +1,6 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
@@ -259,6 +259,44 @@ export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, exp
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), x, y,
     fingerprint: before, origin: leaf.origin }
+}
+
+/** Prepare or verify one visible, approved foreign text field without exporting its value. */
+export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], phase: unknown,
+  value: unknown): Promise<BrowserForeignInputState> {
+  if (phase !== 'select' && phase !== 'verify' ||
+    (phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) ||
+    (phase === 'select' && value !== undefined)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x\d{1,10}-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const id = Number(/^x(\d{1,10})-/iu.exec(input as string)?.[1])
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === id)
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) throw new Error('SIDEBAR_STALE_REF')
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[1])});
+    if (frames.length !== 0 || !['INPUT','TEXTAREA'].includes(node.tagName) ||
+      node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type) ||
+      node.disabled || node.readOnly) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    ${phase === 'select' ? `node.focus();
+    if (document.activeElement !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    node.select();
+    if (node.selectionStart !== 0 || node.selectionEnd !== node.value.length) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }` : `if (document.activeElement !== node || node.value !== ${JSON.stringify(value)}) {
+      throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED');
+    }`}
+    return {hadText:node.value.length > 0};
+  })()`)
+  if (!record(raw) || typeof raw.hadText !== 'boolean' ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint, hadText: raw.hadText }
 }
 
 /** Fixed, bounded child-frame inspection. Form values and element handles stay inside the page. */

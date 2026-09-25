@@ -169,7 +169,9 @@ export function apply(ctx: Context): void {
       if (command.op === 'setValue') {
         if (command.args.value === undefined) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,
-          { op: 'setValue', ref: command.args.ref, value: command.args.value }, stillSelected)
+          { op: 'setValue', ref: command.args.ref, value: command.args.value,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'selectOption') {
         if (command.args.options === undefined) throw new Error('SIDEBAR_OPTION_UNAVAILABLE')

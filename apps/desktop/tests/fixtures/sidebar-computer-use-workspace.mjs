@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, webContents } from 'electron'
 
 const root = process.env.DSH_SIDEBAR_CU_ROOT
 const pageUrl = process.env.DSH_SIDEBAR_CU_PAGE_URL
@@ -340,6 +340,43 @@ async function qualify() {
     assert.equal(crossLocate.result?.isError, false, JSON.stringify(crossLocate.result))
     assert.equal(crossLocate.result?.value?.ok, true, JSON.stringify(crossLocate.result))
     assert.match(crossLocate.result.value.result, /FOREIGN_LOCATOR_OK/)
+    const crossFill = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).fill('Ada'); return 'FOREIGN_FILL_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-fill.json'),
+      JSON.stringify({ sessionId, tool: crossFill }, null, 2))
+    assert.equal(crossFill.result?.isError, false, JSON.stringify(crossFill.result))
+    assert.equal(crossFill.result?.value?.ok, true, JSON.stringify(crossFill.result))
+    assert.match(crossFill.result.value.result, /FOREIGN_FILL_OK/)
+    assert.equal(crossFill.approvals.filter(approval => approval.allowed).length,
+      crossLocate.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame fill needs one-use action confirmation')
+    const foreignGuest = webContents.getAllWebContents().find(contents => contents.getURL() === crossUrl)
+    assert.ok(foreignGuest, 'selected foreign-frame guest should remain mounted')
+    const foreignFrame = foreignGuest.mainFrame.framesInSubtree.find(frame => frame !== foreignGuest.mainFrame)
+    assert.ok(foreignFrame, 'approved foreign frame should still exist')
+    assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
+      'Ada', 'native input should update the actual foreign document')
+    const crossClear = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).fill(''); return 'FOREIGN_CLEAR_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-clear.json'),
+      JSON.stringify({ sessionId, tool: crossClear }, null, 2))
+    assert.equal(crossClear.result?.isError, false, JSON.stringify(crossClear.result))
+    assert.equal(crossClear.result?.value?.ok, true, JSON.stringify(crossClear.result))
+    assert.match(crossClear.result.value.result, /FOREIGN_CLEAR_OK/)
+    assert.equal(crossClear.approvals.filter(approval => approval.allowed).length,
+      crossFill.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame clear needs one-use action confirmation')
+    assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
+      '', 'native Backspace should clear the actual foreign document')
+    const rejectedFill = await control('/invoke', { sessionId,
+      code: `let passwordRejected = false, lockedRejected = false; try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign secret',exact:true}).fill('blocked'); } catch (error) { passwordRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign locked',exact:true}).fill('blocked'); } catch (error) { lockedRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } if(!passwordRejected || !lockedRejected) throw Error('FOREIGN_INPUT_GATE_FAILED'); return 'FOREIGN_INPUT_GATES_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-fill-denied.json'),
+      JSON.stringify({ sessionId, tool: rejectedFill }, null, 2))
+    assert.equal(rejectedFill.result?.isError, false, JSON.stringify(rejectedFill.result))
+    assert.equal(rejectedFill.result?.value?.ok, true, JSON.stringify(rejectedFill.result))
+    assert.match(rejectedFill.result.value.result, /FOREIGN_INPUT_GATES_OK/)
+    assert.deepEqual(await foreignFrame.executeJavaScript(`[document.querySelector('input[aria-label="Foreign secret"]').value,document.querySelector('input[aria-label="Foreign locked"]').value]`),
+      ['safe', 'stable'], 'password and read-only fields must remain unchanged')
     const crossRefClick = await control('/invoke', { sessionId,
       code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Cross-origin frame',exact:true}).click(); let clicked = await t.getAXState({emit:false}); if(!clicked.includes('foreign clicked 1')) throw Error('FOREIGN_REF_CLICK_NOT_OBSERVED'); return 'FOREIGN_REF_CLICK_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-ref-click.json'),
@@ -348,7 +385,7 @@ async function qualify() {
     assert.equal(crossRefClick.result?.value?.ok, true, JSON.stringify(crossRefClick.result))
     assert.match(crossRefClick.result.value.result, /FOREIGN_REF_CLICK_OK/)
     assert.equal(crossRefClick.approvals.filter(approval => approval.allowed).length,
-      crossLocate.approvals.filter(approval => approval.allowed).length + 1,
+      rejectedFill.approvals.filter(approval => approval.allowed).length + 1,
       'Foreign-frame element click needs one-use action confirmation')
     const foreignPoint = await window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(crossUrl)})

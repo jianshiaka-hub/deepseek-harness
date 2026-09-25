@@ -103,6 +103,15 @@ export interface BrowserForeignRefPoint {
   readonly origin: string
 }
 
+/** Bounded acknowledgement for preparing or verifying one foreign text field. */
+export interface BrowserForeignInputState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly hadText: boolean
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -135,6 +144,10 @@ export interface DesktopBrowserBridge {
   /** Revalidate one foreign element ref and resolve its visible point in the top guest viewport. */
   foreignRefPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
+  /** Select or verify only the approved foreign text field named by a fresh ref. */
+  foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify',
+    value?: string): Promise<BrowserForeignInputState>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
