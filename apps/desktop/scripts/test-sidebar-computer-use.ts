@@ -27,7 +27,7 @@ const page = createServer((request, response) => {
     response.end('<!doctype html><button onclick="document.getElementById(\'frameResult\').textContent = \'frame clicked\'">Frame action</button><p id="frameResult">frame idle</p>')
     return
   }
-  response.end('<!doctype html><title>Isolated Computer Use</title><h1>Isolated Computer Use</h1><section data-testid="group-a"><p data-testid="duplicate">Shared</p></section><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section><div id="generic" onclick="this.setAttribute(\'data-state\',\'clicked\')">Generic tile</div><button id="action" data-testid="action" onclick="document.getElementById(\'result\').textContent = \'clicked\'">Click test button</button><p id="result">idle</p><input id="name" aria-label="Name" placeholder="Your name" type="text"><iframe id="inner" src="/frame"></iframe>')
+  response.end('<!doctype html><title>Isolated Computer Use</title><h1>Isolated Computer Use</h1><section data-testid="group-a"><p data-testid="duplicate">Shared</p></section><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section><div id="generic" onclick="this.setAttribute(\'data-state\',\'clicked\')">Generic tile</div><button id="action" data-testid="action" onclick="document.getElementById(\'result\').textContent = \'clicked\'">Click test button</button><p id="result">idle</p><input id="name" aria-label="Name" placeholder="Your name" type="text"><input id="disabled" aria-label="Disabled" disabled><div id="hidden" style="display:none">Hidden element</div><iframe id="inner" src="/frame"></iframe>')
 })
 await new Promise<void>((done, reject) => {
   page.once('error', reject)

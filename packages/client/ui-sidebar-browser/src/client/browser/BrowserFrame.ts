@@ -109,6 +109,7 @@ export interface BrowserLocateSelector {
 export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly frames?: readonly string[]
   readonly scopes?: readonly BrowserLocateSelector[]
+  readonly projection?: 'visible' | 'enabled'
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
 }
 
@@ -116,7 +117,13 @@ export interface BrowserLocateResult {
   readonly url: string
   readonly title: string
   readonly count: number
-  readonly rows: readonly { readonly ref: string; readonly role: string; readonly name: string }[]
+  readonly rows: readonly {
+    readonly ref: string
+    readonly role: string
+    readonly name: string
+    readonly visible?: boolean
+    readonly enabled?: boolean
+  }[]
 }
 
 /** Navigation owns page lifetime; mounting and hiding belong to BrowserPresentation. */

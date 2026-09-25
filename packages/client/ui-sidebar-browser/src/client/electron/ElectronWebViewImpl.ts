@@ -366,7 +366,8 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (element === undefined || !this.ready || this.lifetime.signal.aborted ||
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    if (!validSidebarLocateSelector(query, ['frames', 'scopes', 'position']) ||
+    if (!validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection']) ||
+      query.projection !== undefined && !['visible', 'enabled'].includes(query.projection) ||
       query.scopes !== undefined && (!Array.isArray(query.scopes) || query.scopes.length < 1 ||
         query.scopes.length > 2 || query.scopes.some(scope => !validSidebarLocateSelector(scope))) ||
       query.position !== undefined &&
@@ -423,6 +424,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
           (filter.hasNotText === undefined || !textMatches(text,filter.hasNotText,false));
       };
       let doc = document, prefix = '';
+      const frameNodes = [];
       for (const selector of query.frames || []) {
         let frames;
         try { frames = [...doc.querySelectorAll(selector)].filter(node => node.matches('iframe,frame')); }
@@ -432,6 +434,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
         const child = index < 0 ? null : sidebarFrameDocument(frames[0]);
         if (!child) throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
         prefix += 'f' + index + '-' + sidebarFrameToken(child) + '/';
+        frameNodes.push(frames[0]);
         doc = child;
       }
       let count = 0, first = null, last = null, nth = null;
@@ -461,7 +464,14 @@ export class ElectronWebViewImpl implements BrowserFrame {
         const {doc,prefix,index,node} = chosen;
         const {role,name} = sidebarDescribe(node);
         return [{ref:prefix + 'd' + index + '-' + sidebarDomFingerprint(doc,node,index)
-          + ':' + role + ':' + encodeURIComponent(name),role,name}];
+          + ':' + role + ':' + encodeURIComponent(name),role,name,
+          ...(query.projection === 'visible' ? {visible:[...frameNodes,node].every(element => {
+            const style = element.ownerDocument.defaultView.getComputedStyle(element);
+            return style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+              [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
+          })} : {}),
+          ...(query.projection === 'enabled' ? {enabled:!node.matches(':disabled') &&
+            !node.closest('[aria-disabled="true"],[inert]')} : {})}];
       })();
       return {url:location.href,title:document.title.slice(0,512),count,rows};
     })()`
