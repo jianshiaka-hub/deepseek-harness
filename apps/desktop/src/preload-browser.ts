@@ -21,6 +21,9 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     release: lease => ipcRenderer.invoke(DESKTOP_IPC.browserRelease, lease) as Promise<void>,
     auditFrames: (lease, expectedUrl, approvedOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserAuditFrames,
       lease, expectedUrl, approvedOrigins) as ReturnType<DesktopBrowserBridge['auditFrames']>,
+    inspectForeignText: (lease, expectedUrl, approvedOrigins) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserInspectForeignText, lease, expectedUrl, approvedOrigins) as
+      ReturnType<DesktopBrowserBridge['inspectForeignText']>,
     captureViewport: (lease, expectedUrl, clip, approvedOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserCaptureViewport,
       lease, expectedUrl, clip, approvedOrigins) as ReturnType<DesktopBrowserBridge['captureViewport']>,
     captureFullPage: (lease, expectedUrl, clip, approvedOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserCaptureFullPage,

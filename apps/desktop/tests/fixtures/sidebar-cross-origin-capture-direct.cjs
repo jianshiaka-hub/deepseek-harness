@@ -45,7 +45,18 @@ async function run() {
         frame.origin === embeddedOrigin && frame.url === `${embeddedOrigin}/frame`)) break
       await new Promise(resolve => setTimeout(resolve, 20))
     }
-    const { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport } = await import('../../lib/types/browser-full-page.js')
+    const { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport,
+      readBrowserForeignText } = await import('../../lib/types/browser-full-page.js')
+    const embeddedFrame = guest.mainFrame.framesInSubtree.find(frame => frame.origin === embeddedOrigin)
+    if (await embeddedFrame?.executeJavaScript('document.body.innerText') !== 'Embedded') {
+      throw new Error('Native frame-scoped text read unavailable')
+    }
+    await readBrowserForeignText(guest, url, [topOrigin]).then(
+      () => { throw new Error('Foreign text read without site grant') },
+      error => { if (error?.message !== 'SIDEBAR_FRAME_SITE_NOT_APPROVED') throw error })
+    const foreignText = await readBrowserForeignText(guest, url, [topOrigin, embeddedOrigin])
+    if (foreignText.frames.length !== 1 || foreignText.frames[0].origin !== embeddedOrigin ||
+      foreignText.frames[0].text !== 'Embedded') throw new Error('Approved frame text unavailable')
     const audit = auditBrowserFrames(guest, url)
     if (JSON.stringify(audit.origins) !== JSON.stringify([topOrigin, embeddedOrigin]) ||
       !/^[a-f0-9]{64}$/.test(audit.fingerprint)) throw new Error('Frame origin audit incomplete')

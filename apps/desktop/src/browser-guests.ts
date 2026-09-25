@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { app, clipboard, ClipboardItem, session, type BrowserWindow, type Session, type WebContents } from 'electron'
 import type { BrowserPageScreenshot, BrowserScreenshotClip, DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
-import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, type BrowserFrameAudit } from './browser-full-page.ts'
+import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, readBrowserForeignText,
+  type BrowserForeignText, type BrowserFrameAudit } from './browser-full-page.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
 import { BrowserDragLease } from './browser-drag.ts'
 import { BrowserDialogLease, type BrowserDialogInfo } from './browser-dialog.ts'
@@ -312,6 +313,37 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     return auditBrowserFrames(guest, expectedUrl, approvedOrigins)
+  }
+
+  /** Read approved child-frame body text through the owned guest, with navigation invalidation. */
+  async inspectForeignText(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown): Promise<BrowserForeignText> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||
+      !Array.isArray(approvedOrigins) || !approvedOrigins.every(origin => typeof origin === 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await readBrowserForeignText(guest, expectedUrl, approvedOrigins)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during awaited frame reads.
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
   }
 
   /** Capture the viewport in Main so frame navigation events cannot race the grant. */

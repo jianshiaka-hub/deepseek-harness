@@ -667,6 +667,11 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.auditFrames(event.sender, lease, expectedUrl, approvedOrigins)
   })
+  ipcMain.handle(DESKTOP_IPC.browserInspectForeignText, (event, lease: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.inspectForeignText(event.sender, lease, expectedUrl, approvedOrigins)
+  })
   ipcMain.handle(DESKTOP_IPC.browserCaptureViewport, (event, lease: unknown, expectedUrl: unknown,
     clip: unknown, approvedOrigins: unknown) => {
     assertProductSender(event)

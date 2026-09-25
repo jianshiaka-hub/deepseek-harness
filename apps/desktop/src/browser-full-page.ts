@@ -8,6 +8,7 @@ interface CaptureFrame {
   readonly origin: string
   readonly url: string
   readonly framesInSubtree: CaptureFrame[]
+  executeJavaScript?(code: string): Promise<unknown>
 }
 
 interface CaptureDebugger {
@@ -87,8 +88,13 @@ export interface BrowserFrameAudit {
   readonly fingerprint: string
 }
 
+export interface BrowserForeignText {
+  readonly fingerprint: string
+  readonly frames: readonly { readonly origin: string; readonly text: string }[]
+}
+
 function exactOrigin(value: string): boolean {
-  if (!URL.canParse(value)) return false
+  if (value.length > 2048 || !URL.canParse(value)) return false
   const url = new URL(value)
   return ['http:', 'https:'].includes(url.protocol) && url.origin === value
 }
@@ -131,6 +137,34 @@ export function auditBrowserFrames(guest: FullPageCaptureGuest, expectedUrl: str
   if (guest.mainFrame.url !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
   return { origins: [...origins], fingerprint: createHash('sha256').update(JSON.stringify(
     frames.map(frame => [frame.frameTreeNodeId, frame.origin, frame.url]))).digest('hex') }
+}
+
+/** Read only bounded visible text from approved foreign frames; never form values or page scripts. */
+export async function readBrowserForeignText(guest: FullPageCaptureGuest, expectedUrl: string,
+  approvedOrigins: readonly string[]): Promise<BrowserForeignText> {
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  const topOrigin = new URL(expectedUrl).origin
+  const foreign = guest.mainFrame.framesInSubtree.filter(frame => frame.origin !== topOrigin).slice(0, 8)
+  const frames: { origin: string; text: string }[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const read = async (): Promise<BrowserForeignText> => {
+    for (const frame of foreign) {
+      if (frame.executeJavaScript === undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+      const text = await frame.executeJavaScript(
+        '(() => String(document.body?.innerText ?? "").slice(0,1000).replaceAll("[ref=","[ref ="))()')
+      if (typeof text !== 'string' || text.length > 1000 ||
+        auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      frames.push({ origin: frame.origin, text })
+    }
+    return { fingerprint: before, frames }
+  }
+  try {
+    return await Promise.race([read(), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => { reject(new Error('SIDEBAR_FRAME_READ_TIMEOUT')) }, CAPTURE_TIMEOUT_MS)
+    })])
+  } finally { clearTimeout(timer) }
 }
 
 function pngData(value: unknown, width: number, height: number): string {

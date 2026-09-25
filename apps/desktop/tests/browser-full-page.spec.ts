@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport,
+import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, readBrowserForeignText,
   type ViewportCaptureGuest } from '../src/browser-full-page.ts'
 
 const url = 'https://example.test/page'
@@ -138,6 +138,26 @@ describe('main-owned Sidebar full-page capture', () => {
     await expect(captureBrowserFullPage(h.guest, url, undefined,
       ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     expect(h.state.attached).toBe(false)
+  })
+
+  it('reads only bounded text from a granted foreign frame and rejects navigation during the read', async () => {
+    const h = fixture()
+    const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: 'https://embedded.test/widget', framesInSubtree: [],
+      executeJavaScript: vi.fn(async () => 'Embedded') }
+    h.frame.framesInSubtree.push(foreign)
+    await expect(readBrowserForeignText(h.guest, url, ['https://example.test']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    await expect(readBrowserForeignText(h.guest, url,
+      ['https://example.test', 'https://embedded.test'])).resolves.toMatchObject({
+      frames: [{ origin: 'https://embedded.test', text: 'Embedded' }],
+    })
+    foreign.executeJavaScript.mockImplementationOnce(async () => {
+      foreign.url = 'https://embedded.test/next'
+      return 'New content'
+    })
+    await expect(readBrowserForeignText(h.guest, url,
+      ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_NAVIGATED')
   })
 
   it('bounds viewport pixels and rejects a frame that changes while the native capture runs', async () => {

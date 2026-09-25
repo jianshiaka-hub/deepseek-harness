@@ -326,6 +326,13 @@ async function qualify() {
     await waitFor(async () => (await control('/status')).selectedTabs.some(tab =>
       tab.sessionId === sessionId && tab.observedUrl === crossUrl),
     'cross-origin Sidebar reporter registration', 10000)
+    const crossText = await control('/invoke', { sessionId,
+      code: `let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame')) throw Error('FOREIGN_FRAME_TEXT_MISSING'); return 'FOREIGN_TEXT_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-text.json'),
+      JSON.stringify({ sessionId, tool: crossText }, null, 2))
+    assert.equal(crossText.result?.isError, false, JSON.stringify(crossText.result))
+    assert.equal(crossText.result?.value?.ok, true, JSON.stringify(crossText.result))
+    assert.match(crossText.result.value.result, /FOREIGN_TEXT_OK/)
     const crossShot = await control('/invoke', { sessionId,
       code: `let crossViewport = await t.screenshot({emit:false}); let crossFull = await t.screenshot({fullPage:true,emit:false}); return 'CROSS_PNG_' + crossViewport.length + '_' + crossFull.length;` })
     await writeFile(join(root, 'computer-use-cross-origin-screenshot.json'),

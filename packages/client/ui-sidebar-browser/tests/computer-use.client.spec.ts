@@ -362,6 +362,14 @@ it('reads top-level text and refs, acts on a matching ref, and refuses navigatio
     frame.remove()
     hit = button
 
+    h.frameAudit.origins.push('https://foreign.test')
+    h.bridge.inspectForeignText.mockResolvedValueOnce({ fingerprint: 'frame-1',
+      frames: [{ origin: 'https://foreign.test', text: 'Foreign approved text' }] })
+    await expect(h.frame.inspect?.(url)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    const foreignRead = await h.frame.inspect?.(url, ['https://example.test', 'https://foreign.test'])
+    expect(foreignRead?.text).toContain('[Approved frame https://foreign.test] Foreign approved text')
+    h.frameAudit.origins.pop()
+
     guestUrl = 'https://other.test/'
     await expect(h.frame.inspect?.(url)).rejects.toThrow('SIDEBAR_NAVIGATED')
   } finally {

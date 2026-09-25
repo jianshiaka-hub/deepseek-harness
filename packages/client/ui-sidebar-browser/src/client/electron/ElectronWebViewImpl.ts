@@ -344,13 +344,21 @@ export class ElectronWebViewImpl implements BrowserFrame {
     } else this.navigate('reload')
   }
 
-  /** Read the selected guest's top-level document after exact URL checks on both sides of execution. */
-  async inspect(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }> {
+  /** Read the selected document and approved foreign frames after exact URL checks. */
+  async inspect(expectedUrl: string, approvedOrigins?: readonly string[]): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly text: string
+  }> {
     const element = this.element
-    if (element === undefined || !this.ready || this.lifetime.signal.aborted ||
-      this.store.getSnapshot().address !== 'observed' || element.getURL() !== expectedUrl) {
+    const lease = this.lease
+    if (element === undefined || lease === undefined || !this.ready || this.lifetime.signal.aborted ||
+      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
+      element.getURL() !== expectedUrl) {
       throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     }
+    const approved = approvedOrigins ?? [new URL(expectedUrl).origin]
+    const before = await this.bridge.auditFrames(lease, expectedUrl, approved)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -381,11 +389,24 @@ export class ElectronWebViewImpl implements BrowserFrame {
     })()`
     const value = await element.executeJavaScript(code)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest may change while executeJavaScript awaits.
-    if (this.element !== element || this.lifetime.signal.aborted || element.getURL() !== expectedUrl ||
-      this.store.getSnapshot().address !== 'observed' || typeof value !== 'object' || value === null ||
+    if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
+      element.getURL() !== expectedUrl || this.store.getSnapshot().address !== 'observed' ||
+      this.store.getSnapshot().loading || typeof value !== 'object' || value === null ||
       !('url' in value) || value.url !== expectedUrl || !('title' in value) || typeof value.title !== 'string' ||
       !('text' in value) || typeof value.text !== 'string') throw new Error('SIDEBAR_NAVIGATED')
-    return { url: value.url, title: value.title, text: value.text }
+    const foreign = await this.bridge.inspectForeignText(lease, expectedUrl, approved)
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- The selected guest can be disposed while IPC awaits.
+    if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
+      element.getURL() !== expectedUrl || this.store.getSnapshot().address !== 'observed' ||
+      this.store.getSnapshot().loading || foreign.fingerprint !== before.fingerprint ||
+      foreign.frames.length > 8 || foreign.frames.some(frame => !approved.includes(frame.origin) ||
+        frame.origin === new URL(expectedUrl).origin || frame.text.length > 1000) ||
+      (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
+    const frameText = foreign.frames.map(frame => `[Approved frame ${frame.origin}] ${frame.text}`).join('\n')
+    return { url: value.url, title: value.title, text: frameText.length === 0 ? value.text
+      : `${value.text.slice(0, 31_999 - frameText.length)}\n${frameText}` }
   }
 
   /** Reveal only current frame origins to the authenticated Host's grant flow. */

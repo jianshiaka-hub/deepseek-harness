@@ -168,7 +168,11 @@ export interface BrowserLocateResult {
 export interface BrowserFrame extends HostObservable<BrowserFrameState> {
   readonly sandbox?: BrowserSandboxControl
   /** Inspect only the observed top-level HTTP(S) document in a desktop guest. */
-  inspect?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  inspect?(expectedUrl: string, approvedOrigins?: readonly string[]): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly text: string
+  }>
   /** List only source origins in the selected guest for a subsequent site-grant check. */
   frameOrigins?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly origins: readonly string[] }>
   /** Query bounded DOM nodes in the observed guest without executing caller JavaScript. */

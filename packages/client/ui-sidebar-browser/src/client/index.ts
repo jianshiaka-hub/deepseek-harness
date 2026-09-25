@@ -90,7 +90,8 @@ export function apply(ctx: Context): void {
       const controller = controllers.get(tab.sessionId as BrowserBodyProps['sessionId'])
       if (controller === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
       const tabId = tab.tabId as Parameters<BrowserInjected['inspect']>[0]
-      if (command.op === 'inspect') return controller.inspect(tabId, command.expectedUrl)
+      if (command.op === 'inspect') return controller.inspect(tabId, command.expectedUrl,
+        command.args.approvedFrameOrigins)
       if (command.op === 'frameOrigins') return controller.frameOrigins(tabId, command.expectedUrl)
       if (command.op === 'locate') {
         if (command.args.query === undefined) throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')

@@ -30,6 +30,12 @@ export interface BrowserFrameAudit {
   readonly fingerprint: string
 }
 
+/** Bounded visible text from currently approved foreign child frames. */
+export interface BrowserForeignText {
+  readonly fingerprint: string
+  readonly frames: readonly { readonly origin: string; readonly text: string }[]
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -53,6 +59,9 @@ export interface DesktopBrowserBridge {
   /** List current frame origins or verify a supplied exact-origin grant set. */
   auditFrames(lease: DesktopBrowserLeaseId, expectedUrl: string,
     approvedOrigins?: readonly string[]): Promise<BrowserFrameAudit>
+  /** Read bounded body text from exact-origin approved foreign frames. */
+  inspectForeignText(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[]): Promise<BrowserForeignText>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>

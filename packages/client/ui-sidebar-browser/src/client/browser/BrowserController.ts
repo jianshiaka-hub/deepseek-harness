@@ -75,11 +75,16 @@ export class BrowserController implements HostObservable<BrowserControllerState>
   /**
    * Inspect a mounted desktop page only while its observed URL matches.
    * @param expectedUrl - exact URL approved by the Host.
+   * @param approvedOrigins - exact iframe origins approved for this read.
    * @returns bounded page text, same-origin frame labels and title.
    */
-  inspect(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }> {
+  inspect(expectedUrl: string, approvedOrigins?: readonly string[]): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly text: string
+  }> {
     if (this.disposed || this.page.frame.inspect === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    return this.page.frame.inspect(expectedUrl)
+    return this.page.frame.inspect(expectedUrl, approvedOrigins)
   }
 
   /**
@@ -358,7 +363,11 @@ export interface BrowserInjected {
   /** Latest state for one mounted tab without opening another tab. */
   snapshot(tabId: TabId): BrowserControllerState | undefined
   /** Inspect one mounted desktop tab. */
-  inspect(tabId: TabId, expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  inspect(tabId: TabId, expectedUrl: string, approvedOrigins?: readonly string[]): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly text: string
+  }>
   frameOrigins(tabId: TabId, expectedUrl: string): Promise<{
     readonly url: string
     readonly title: string
@@ -425,7 +434,7 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
   return {
     keyedHooks: { browserState: key => controller(key as TabId) },
     snapshot: id => controller(id)?.getSnapshot(),
-    inspect: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.inspect(expectedUrl) },
+    inspect: (id, expectedUrl, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.inspect(expectedUrl, approvedOrigins) },
     frameOrigins: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.frameOrigins(expectedUrl) },
     locate: (id, expectedUrl, query) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.locate(expectedUrl, query) },
     screenshot: (id, expectedUrl, clip, fullPage, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.screenshot(expectedUrl, clip, fullPage, approvedOrigins) },

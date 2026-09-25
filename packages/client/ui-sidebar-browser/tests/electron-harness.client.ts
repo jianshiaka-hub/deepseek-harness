@@ -1,6 +1,6 @@
 /** Native webview events controlled by each test; presentation and navigation stay real. */
 import { vi } from 'vitest'
-import type { BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
+import type { BrowserForeignText, BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
 import type { BrowserTabState } from '../src/client/browser/BrowserPersistence.ts'
 import { createElectronPage } from '../src/client/electron/pages.ts'
 import { ElectronWebviewPresentation } from '../src/client/electron/ElectronWebviewPresentation.ts'
@@ -21,6 +21,9 @@ export function electronFixture(initial?: BrowserTabState) {
       }
       return { origins: [...frameAudit.origins], fingerprint: frameAudit.fingerprint }
     }),
+    inspectForeignText: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string): Promise<BrowserForeignText> => ({
+      fingerprint: frameAudit.fingerprint, frames: [],
+    })),
     captureViewport: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
       url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
       viewport: { width: 1, height: 1 },
