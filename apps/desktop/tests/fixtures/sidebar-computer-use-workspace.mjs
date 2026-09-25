@@ -544,17 +544,18 @@ async function qualify() {
       foreignDragOuter.y + foreignDragLocal.to.y]
     const crossDrag = await control('/invoke', { sessionId,
       code: `await t.screenshot({emit:false}); const result = await t.drag(${JSON.stringify(foreignDragFrom)},${JSON.stringify(foreignDragTo)}); return 'FOREIGN_DRAG_' + String(result.dropDispatched);` })
-    await writeFile(join(root, 'computer-use-cross-origin-drag.json'),
-      JSON.stringify({ sessionId, tool: crossDrag, foreignDragFrom, foreignDragTo }, null, 2))
     assert.equal(crossDrag.result?.isError, false, JSON.stringify(crossDrag.result))
     assert.equal(crossDrag.result?.value?.ok, true, JSON.stringify(crossDrag.result))
     assert.match(crossDrag.result.value.result, /FOREIGN_DRAG_true/)
     assert.equal(crossDrag.approvals.filter(approval => approval.allowed).length,
       crossSecondary.approvals.filter(approval => approval.allowed).length + 1,
       'foreign drag needs one-use confirmation after every frame site is approved')
-    assert.deepEqual(await foreignFrame.executeJavaScript(`({drag:document.body.dataset.foreignDragTrusted,
-      drop:document.body.dataset.foreignDropTrusted,value:document.body.dataset.foreignDropValue})`),
+    const foreignDragState = await foreignFrame.executeJavaScript(`({drag:document.body.dataset.foreignDragTrusted,
+      drop:document.body.dataset.foreignDropTrusted,value:document.body.dataset.foreignDropValue})`)
+    assert.deepEqual(foreignDragState,
     {drag:'true',drop:'true',value:'foreign-payload'})
+    await writeFile(join(root, 'computer-use-cross-origin-drag.json'),
+      JSON.stringify({ sessionId, tool: crossDrag, foreignDragFrom, foreignDragTo, foreignDragState }, null, 2))
     await foreignFrame.executeJavaScript(`document.body.insertAdjacentHTML('beforeend',
       '<div style="height:1400px">Foreign scroll tail</div>')`)
     const foreignScrollBefore = await foreignFrame.executeJavaScript('window.scrollY')
