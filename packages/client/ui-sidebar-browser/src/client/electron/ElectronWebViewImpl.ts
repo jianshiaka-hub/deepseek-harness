@@ -672,7 +672,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
       if (outcome.kind === 'error') throw outcome.error
       if (outcome.kind === 'action') {
         let late: BrowserJsDialog | null
-        try { late = await this.bridge.getDialog(lease, token) }
+        try {
+          late = await this.bridge.getDialog(lease, token)
+          if (late === null) late = await this.bridge.waitDialog(lease, token, 250)
+        }
         catch (error) {
           const state = this.store.getSnapshot()
           if (this.element === element && !this.lifetime.signal.aborted && stillSelected() &&

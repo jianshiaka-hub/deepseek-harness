@@ -62,6 +62,25 @@ it('forwards an approved prompt answer to only the retained guest dialog lease',
   } finally { action.mockRestore(); await h.dispose() }
 })
 
+it('keeps a bounded dialog watch when native click completes before a frame prompt arrives', async () => {
+  const { h } = await readyFixture()
+  const dialog: BrowserJsDialog = { id: 'e2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }
+  const action = vi.spyOn(h.frame, 'action').mockResolvedValue({ url, title: 'Example', performed: true })
+  h.bridge.getDialog.mockResolvedValueOnce(null).mockResolvedValue(dialog)
+  h.bridge.waitDialog.mockImplementation(async (_lease, _token, timeoutMs) =>
+    timeoutMs === 250 ? dialog : new Promise(() => {}))
+  try {
+    await expect(h.frame.actionWithDialog?.(url, { op: 'click', x: 20, y: 20 }, () => true))
+      .resolves.toMatchObject({ dialog })
+    expect(h.bridge.waitDialog).toHaveBeenCalledWith(h.reservation.lease, 'dialog-lease', 250)
+    await expect(h.frame.handleDialog?.(url, dialog.id, 'accept', 'answered', () => true))
+      .resolves.toMatchObject({ performed: true })
+    expect(h.bridge.handleDialog).toHaveBeenCalledWith(h.reservation.lease, 'dialog-lease',
+      dialog.id, 'accept', 'answered')
+    expect(h.frame.pendingDialogUrl?.()).toBeUndefined()
+  } finally { action.mockRestore(); await h.dispose() }
+})
+
 it('releases the guest debugger when selection changes before a modal is resolved', async () => {
   const { h } = await readyFixture()
   const dialog: BrowserJsDialog = { id: 'b2f81017-5baf-422a-830d-843c43f67ed4', type: 'alert' }

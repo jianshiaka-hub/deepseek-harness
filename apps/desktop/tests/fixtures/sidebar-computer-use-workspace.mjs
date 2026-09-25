@@ -285,6 +285,32 @@ async function qualify() {
     assert.deepEqual(sequentialState.events.filter(event => event.type === 'input').map(event => event.data), ['A','你','😀'])
     assert.equal(sequentialState.events.filter(event => event.type === 'keydown' && event.trusted).length, 3)
     assert.ok(sequentialState.events.every(event => event.trusted))
+    const framePromptSetup = `(() => {
+      const child = document.getElementById('inner').contentDocument;
+      const button = child.createElement('button');
+      button.id = 'framePrompt';
+      button.textContent = 'Frame prompt';
+      button.addEventListener('click', () => {
+        child.getElementById('frameResult').textContent =
+          child.defaultView.prompt('Frame question', 'default') ?? 'dismissed';
+      });
+      child.body.append(button);
+    })()`
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript(${JSON.stringify(framePromptSetup)})`)
+    const framePrompt = await control('/invoke', { sessionId,
+      code: `let clickedPrompt = await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame prompt',exact:true}).click(); let frameDialog = await t.getJsDialog(); if(frameDialog?.type !== 'prompt') return 'FRAME_PROMPT_MISSING_' + JSON.stringify(clickedPrompt); await frameDialog.accept('answered'); return 'FRAME_PROMPT_OK';` })
+    await writeFile(join(root, 'computer-use-frame-prompt.json'),
+      JSON.stringify({ sessionId, tool: framePrompt }, null, 2))
+    assert.equal(framePrompt.result?.isError, false, JSON.stringify(framePrompt.result))
+    assert.equal(framePrompt.result?.value?.ok, true, JSON.stringify(framePrompt.result))
+    assert.match(framePrompt.result.value.result, /FRAME_PROMPT_OK/)
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.getElementById("inner").contentDocument.getElementById("frameResult").textContent === "answered"')`),
+    'same-origin Sidebar frame prompt answer')
+    await writeFile(join(root, 'computer-use-frame-prompt-state.json'), JSON.stringify({ answered: true }))
     const crossUrl = new URL('/cross-origin', pageUrl).href
     await window.webContents.executeJavaScript(`(${address}).focus(); (${address}).select()`)
     await window.webContents.insertText(crossUrl)
