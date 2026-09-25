@@ -333,6 +333,20 @@ async function qualify() {
     assert.equal(crossText.result?.isError, false, JSON.stringify(crossText.result))
     assert.equal(crossText.result?.value?.ok, true, JSON.stringify(crossText.result))
     assert.match(crossText.result.value.result, /FOREIGN_TEXT_OK/)
+    const foreignPoint = await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(crossUrl)})
+        .executeJavaScript('(() => { const rect = document.getElementById("foreign").getBoundingClientRect(); return [Math.round(rect.left + 65),Math.round(rect.top + 20)]; })()')`)
+    const crossClick = await control('/invoke', { sessionId,
+      code: `await t.click(${JSON.stringify(foreignPoint)}); let clicked = await t.getAXState({emit:false}); if(!clicked.includes('foreign clicked')) throw Error('FOREIGN_CLICK_NOT_OBSERVED'); return 'FOREIGN_CLICK_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-click.json'),
+      JSON.stringify({ sessionId, tool: crossClick }, null, 2))
+    assert.equal(crossClick.result?.isError, false, JSON.stringify(crossClick.result))
+    assert.equal(crossClick.result?.value?.ok, true, JSON.stringify(crossClick.result))
+    assert.match(crossClick.result.value.result, /FOREIGN_CLICK_OK/)
+    assert.equal(crossClick.approvals.filter(approval => approval.allowed).length,
+      crossText.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame coordinate click needs one-use action confirmation')
+    assert.match(crossClick.approvals.at(-1).reason, /网页坐标/)
     const crossShot = await control('/invoke', { sessionId,
       code: `let crossViewport = await t.screenshot({emit:false}); let crossFull = await t.screenshot({fullPage:true,emit:false}); return 'CROSS_PNG_' + crossViewport.length + '_' + crossFull.length;` })
     await writeFile(join(root, 'computer-use-cross-origin-screenshot.json'),

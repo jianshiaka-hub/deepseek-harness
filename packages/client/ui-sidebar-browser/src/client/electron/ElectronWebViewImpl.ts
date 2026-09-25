@@ -1431,10 +1431,45 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeClick(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'click' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.ref === undefined ? action.approvedFrameOrigins : undefined
+    if (approved !== undefined && lease === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const before = approved === undefined || lease === undefined ? undefined
+      : await this.bridge.auditFrames(lease, expectedUrl, approved)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
       const action = ${JSON.stringify(action)};
+      const clickHit = (x, y) => {
+        let doc = document;
+        let localX = x, localY = y;
+        const frames = [];
+        for (;;) {
+          const hit = doc.elementFromPoint(localX, localY);
+          if (!hit) throw new Error('SIDEBAR_TARGET_OCCLUDED');
+          if (!hit.matches('iframe,frame')) return {hit,frames,foreign:false};
+          if (frames.length >= 8 || !sidebarFrames(doc).includes(hit)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+          const child = sidebarFrameDocument(hit);
+          if (!child) {
+            if (action.ref !== undefined || !Array.isArray(action.approvedFrameOrigins)) {
+              throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+            }
+            const src = hit.getAttribute('src');
+            const target = src ? new URL(src, doc.baseURI) : null;
+            if (!target || !['http:','https:'].includes(target.protocol) ||
+              target.origin === location.origin ||
+              !action.approvedFrameOrigins.includes(target.origin)) {
+              throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+            }
+            return {hit,frames,foreign:true};
+          }
+          const rect = hit.getBoundingClientRect();
+          localX -= rect.left + hit.clientLeft;
+          localY -= rect.top + hit.clientTop;
+          frames.push(hit);
+          doc = child;
+        }
+      };
       let x = action.x, y = action.y;
       let target = null;
       if (action.ref !== undefined) {
@@ -1449,15 +1484,17 @@ export class ElectronWebViewImpl implements BrowserFrame {
       }
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 ||
         x >= innerWidth || y >= innerHeight) throw new Error('SIDEBAR_POINT_OUT_OF_BOUNDS');
-      const {hit,frames} = sidebarHit(x,y);
+      const {hit,frames,foreign} = clickHit(x,y);
       const frameTokens = frames.map(frame => {
         const child = sidebarFrameDocument(frame);
         if (!child) throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
         return sidebarFrameToken(child);
       });
-      const fingerprint = [frameTokens.join('/'),target?.getAttribute('aria-expanded'),hit.tagName, hit.id,
+      const bounds = hit.getBoundingClientRect();
+      const fingerprint = [frameTokens.join('/'),foreign,target?.getAttribute('aria-expanded'),hit.tagName, hit.id,
         hit.getAttribute('role'), hit.getAttribute('aria-label'),
-        hit.getAttribute('type'), hit.getAttribute('href')].join('|');
+        hit.getAttribute('type'), hit.getAttribute('href'),hit.getAttribute('src'),
+        bounds.left,bounds.top,bounds.width,bounds.height].join('|');
       return {x, y, url:location.href, title:document.title.slice(0,512), fingerprint};
     })()`
     const point = await element.executeJavaScript(code)
@@ -1468,6 +1505,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
       throw new Error('SIDEBAR_POINT_UNAVAILABLE')
     }
     if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
+    if (before !== undefined && lease !== undefined &&
+      (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
     const button = action.button ?? 'left'
     const clickCount = action.count ?? 1
     if (!['left','middle','right'].includes(button) || !Number.isSafeInteger(clickCount) ||
@@ -1479,6 +1520,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
       !('fingerprint' in moved) || moved.x !== point.x || moved.y !== point.y ||
       moved.fingerprint !== point.fingerprint ||
       !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_TARGET_MOVED')
+    if (before !== undefined && lease !== undefined &&
+      (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
     await element.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button, clickCount })
     await element.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button, clickCount })
     return { url: expectedUrl, title: point.title, performed: true }

@@ -35,6 +35,8 @@ export type BrowserDomAction =
     readonly y?: number
     readonly button?: 'left' | 'middle' | 'right'
     readonly count?: number
+    /** Exact source origins approved before a coordinate click can enter a foreign frame. */
+    readonly approvedFrameOrigins?: readonly string[]
     /** Internal precondition for an exposed expand/collapse action. */
     readonly expectedExpanded?: 'true' | 'false'
     /** Require the same interactive role that was exposed by inspection. */

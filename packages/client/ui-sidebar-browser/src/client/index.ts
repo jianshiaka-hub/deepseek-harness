@@ -127,6 +127,8 @@ export function apply(ctx: Context): void {
         const options = {
           ...(command.args.button === undefined ? {} : { button: command.args.button }),
           ...(command.args.count === undefined ? {} : { count: command.args.count }),
+          ...(command.args.approvedFrameOrigins === undefined ? {}
+            : { approvedFrameOrigins: command.args.approvedFrameOrigins }),
         }
         if (command.args.ref !== undefined) return controller.action(tabId, command.expectedUrl,
           { op: 'click', ref: command.args.ref, ...options }, stillSelected)
