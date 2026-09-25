@@ -1,6 +1,7 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import { sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
   readonly detached: boolean
@@ -8,6 +9,8 @@ interface CaptureFrame {
   readonly origin: string
   readonly url: string
   readonly framesInSubtree: CaptureFrame[]
+  readonly frames?: CaptureFrame[]
+  readonly name?: string
   executeJavaScript?(code: string): Promise<unknown>
 }
 
@@ -91,6 +94,90 @@ export interface BrowserFrameAudit {
 export interface BrowserForeignText {
   readonly fingerprint: string
   readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
+}
+
+interface ForeignFrameDescriptor {
+  readonly src: string
+  readonly name: string
+}
+
+/** Resolve a named or uniquely addressed child without assuming DOM and native frame orders match. */
+async function resolveForeignFrame(parent: CaptureFrame, selector: string): Promise<{
+  readonly frame: CaptureFrame
+  readonly descriptor: ForeignFrameDescriptor
+}> {
+  if (parent.executeJavaScript === undefined || parent.frames === undefined) {
+    throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  }
+  const raw = await parent.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(parent.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    let frames;
+    try { frames = [...document.querySelectorAll(${JSON.stringify(selector)})]
+      .filter(node => node.matches('iframe,frame')); }
+    catch { throw new Error('SIDEBAR_SELECTOR_INVALID'); }
+    if (frames.length !== 1) throw new Error(frames.length
+      ? 'SIDEBAR_FRAME_AMBIGUOUS' : 'SIDEBAR_FRAME_NOT_FOUND');
+    return {src:frames[0].src,name:frames[0].getAttribute('name') || ''};
+  })()`)
+  if (!record(raw) || typeof raw.src !== 'string' || typeof raw.name !== 'string' ||
+    raw.src.length > 16_384 || raw.name.length > 256 || !URL.canParse(raw.src) ||
+    !['http:', 'https:'].includes(new URL(raw.src).protocol)) {
+    throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  }
+  const matches = parent.frames.filter(frame => !frame.detached && frame.url === raw.src &&
+    frame.name === raw.name)
+  const match = matches[0]
+  if (matches.length !== 1 || match === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
+  return { frame: match, descriptor: { src: raw.src, name: raw.name } }
+}
+
+/** Query one explicitly selected, approved foreign frame with the same bounded DOM engine as the Webview. */
+export async function locateBrowserForeignFrame(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[]): Promise<BrowserLocateResult> {
+  if (!validSidebarLocateQuery(input as BrowserLocateQuery)) throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
+  const query = input as BrowserLocateQuery
+  if (query.frames === undefined ||
+    JSON.stringify(query).length > 8192) throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  let frame = guest.mainFrame
+  const { frames: frameSelectors, ...foreignQuery } = query
+  const path: {
+    parent: CaptureFrame
+    child: CaptureFrame
+    selector: string
+    descriptor: ForeignFrameDescriptor
+  }[] = []
+  for (const selector of frameSelectors) {
+    const parent = frame
+    const resolved = await resolveForeignFrame(parent, selector)
+    path.push({ parent, child: resolved.frame, selector, descriptor: resolved.descriptor })
+    frame = resolved.frame
+    if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
+  }
+  if (!path.some(step => step.child.origin !== step.parent.origin) || frame.executeJavaScript === undefined) {
+    throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  }
+  const raw = await frame.executeJavaScript(sidebarLocateCode(frame.url, foreignQuery))
+  if (!record(raw) || raw.url !== frame.url || !Number.isSafeInteger(raw.count) ||
+    typeof raw.count !== 'number' || raw.count < 0 || raw.count > 1_000_000 ||
+    !Array.isArray(raw.rows) || raw.rows.length > 1 || raw.rows.some((row: unknown) =>
+    !record(row) || typeof row.ref !== 'string' || !/^d\d{1,5}-[0-9a-f]{8}:/u.test(row.ref))) {
+    throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  }
+  for (const step of path) {
+    const again = await resolveForeignFrame(step.parent, step.selector)
+    if (again.frame !== step.child || again.descriptor.src !== step.descriptor.src ||
+      again.descriptor.name !== step.descriptor.name) throw new Error('SIDEBAR_NAVIGATED')
+  }
+  if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  const prefix = `x${frame.frameTreeNodeId}-${before}/`
+  const rows = raw.rows as BrowserLocateResult['rows']
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), count: raw.count,
+    rows: rows.map(row => ({ ...row, ref: prefix + row.ref })) }
 }
 
 /** Fixed, bounded child-frame inspection. Form values and element handles stay inside the page. */

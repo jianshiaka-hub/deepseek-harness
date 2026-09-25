@@ -95,7 +95,8 @@ export function apply(ctx: Context): void {
       if (command.op === 'frameOrigins') return controller.frameOrigins(tabId, command.expectedUrl)
       if (command.op === 'locate') {
         if (command.args.query === undefined) throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
-        return controller.locate(tabId, command.expectedUrl, command.args.query)
+        return controller.locate(tabId, command.expectedUrl, command.args.query,
+          command.args.approvedFrameOrigins)
       }
       if (command.op === 'dialog') return controller.dialog(tabId, command.expectedUrl, stillSelected)
       if (command.op === 'dialogAction') {

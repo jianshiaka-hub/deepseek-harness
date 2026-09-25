@@ -95,7 +95,8 @@ export interface BrowserOptionSelector {
 }
 
 export type { BrowserPageScreenshot, BrowserScreenshotClip } from '../../types.ts'
-import type { BrowserJsDialog, BrowserPageScreenshot, BrowserScreenshotClip } from '../../types.ts'
+import type { BrowserJsDialog, BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult } from '../../types.ts'
+export type { BrowserLocateSelector, BrowserRelativeLocateFilter, BrowserRelativeLocateSelector, BrowserRelativeLocateQuery, BrowserLocateQuery, BrowserLocateResult } from '../../types.ts'
 
 /** A modal can interrupt an otherwise pending native input command. */
 export interface BrowserDomDialogResult extends BrowserDomActionResult {
@@ -107,63 +108,6 @@ export interface BrowserDialogState {
   readonly url: string
   readonly title: string
   readonly dialog: BrowserJsDialog | null
-}
-
-/** One bounded selector and optional local filter over the approved document. */
-export interface BrowserLocateSelector {
-  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
-  readonly value: string
-  readonly name?: string
-  readonly exact: boolean
-  readonly filter?: {
-    readonly hasText?: string
-    readonly hasNotText?: string
-    readonly visible?: boolean
-    readonly has?: BrowserRelativeLocateQuery
-    readonly hasNot?: BrowserRelativeLocateQuery
-  }
-}
-
-/** Local filters allowed within a relative locator, without another descendant query. */
-export interface BrowserRelativeLocateFilter {
-  readonly hasText?: string
-  readonly hasNotText?: string
-  readonly visible?: boolean
-}
-
-/** One selector inside a candidate; no nested frame or locator-valued filter. */
-export type BrowserRelativeLocateSelector = Omit<BrowserLocateSelector, 'filter'> & {
-  readonly filter?: BrowserRelativeLocateFilter
-}
-
-/** Up to three relative selector steps inside each candidate element. */
-export type BrowserRelativeLocateQuery = BrowserRelativeLocateSelector & {
-  readonly scopes?: readonly BrowserRelativeLocateSelector[]
-}
-
-/** A selector chain within the top document or explicit same-origin frames. */
-export interface BrowserLocateQuery extends BrowserLocateSelector {
-  readonly frames?: readonly string[]
-  readonly scopes?: readonly BrowserLocateSelector[]
-  readonly projection?: 'visible' | 'enabled' | 'checked' | 'text'
-  readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
-  readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
-}
-
-/** Count of matches and at most one document-bound reference or requested state. */
-export interface BrowserLocateResult {
-  readonly url: string
-  readonly title: string
-  readonly count: number
-  readonly rows: readonly {
-    readonly ref: string
-    readonly role: string
-    readonly name: string
-    readonly visible?: boolean
-    readonly enabled?: boolean
-    readonly checked?: boolean
-    readonly text?: string
-  }[]
 }
 
 /** Navigation owns page lifetime; mounting and hiding belong to BrowserPresentation. */
@@ -178,7 +122,8 @@ export interface BrowserFrame extends HostObservable<BrowserFrameState> {
   /** List only source origins in the selected guest for a subsequent site-grant check. */
   frameOrigins?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly origins: readonly string[] }>
   /** Query bounded DOM nodes in the observed guest without executing caller JavaScript. */
-  locate?(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
+  locate?(expectedUrl: string, query: BrowserLocateQuery,
+    approvedOrigins?: readonly string[]): Promise<BrowserLocateResult>
   /** Capture the observed guest's viewport or full page. */
   screenshot?(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>

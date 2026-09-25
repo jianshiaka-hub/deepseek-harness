@@ -101,11 +101,13 @@ export class BrowserController implements HostObservable<BrowserControllerState>
    * Query the approved selected document with a bounded locator.
    * @param expectedUrl - Exact observed URL approved by the Host.
    * @param query - Selector steps and optional one-field projection.
+   * @param approvedOrigins - Exact child-frame sites approved for a foreign-frame query.
    * @returns Match count and at most one document-bound element reference.
    */
-  locate(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult> {
+  locate(expectedUrl: string, query: BrowserLocateQuery,
+    approvedOrigins?: readonly string[]): Promise<BrowserLocateResult> {
     if (this.disposed || this.page.frame.locate === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    return this.page.frame.locate(expectedUrl, query)
+    return this.page.frame.locate(expectedUrl, query, approvedOrigins)
   }
 
   /**
@@ -374,7 +376,8 @@ export interface BrowserInjected {
     readonly origins: readonly string[]
   }>
   /** Query a bounded set of DOM nodes in the selected desktop tab. */
-  locate(tabId: TabId, expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
+  locate(tabId: TabId, expectedUrl: string, query: BrowserLocateQuery,
+    approvedOrigins?: readonly string[]): Promise<BrowserLocateResult>
   /** Capture the visible viewport of one mounted desktop tab. */
   screenshot(tabId: TabId, expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
@@ -436,7 +439,7 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
     snapshot: id => controller(id)?.getSnapshot(),
     inspect: (id, expectedUrl, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.inspect(expectedUrl, approvedOrigins) },
     frameOrigins: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.frameOrigins(expectedUrl) },
-    locate: (id, expectedUrl, query) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.locate(expectedUrl, query) },
+    locate: (id, expectedUrl, query, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.locate(expectedUrl, query, approvedOrigins) },
     screenshot: (id, expectedUrl, clip, fullPage, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.screenshot(expectedUrl, clip, fullPage, approvedOrigins) },
     action: (id, expectedUrl, action, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.action(expectedUrl, action, stillSelected) },
     dialog: (id, expectedUrl, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.dialog(expectedUrl, stillSelected) },

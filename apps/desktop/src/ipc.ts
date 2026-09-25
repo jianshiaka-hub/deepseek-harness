@@ -21,6 +21,7 @@ export const DESKTOP_IPC = {
   browserRelease: 'dsh-desktop:browser-release',
   browserAuditFrames: 'dsh-desktop:browser-audit-frames',
   browserInspectForeignText: 'dsh-desktop:browser-inspect-foreign-text',
+  browserLocateForeign: 'dsh-desktop:browser-locate-foreign',
   browserCaptureViewport: 'dsh-desktop:browser-capture-viewport',
   browserCaptureFullPage: 'dsh-desktop:browser-capture-full-page',
   browserPasteBegin: 'dsh-desktop:browser-paste-begin',

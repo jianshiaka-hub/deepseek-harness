@@ -78,6 +78,7 @@ describe('ui-sidebar-browser apply', () => {
       release: vi.fn(async () => {}),
       auditFrames: vi.fn(async () => { throw new Error('not used in apply test') }),
       inspectForeignText: vi.fn(async () => { throw new Error('not used in apply test') }),
+      locateForeign: vi.fn(async () => { throw new Error('not used in apply test') }),
       captureViewport: vi.fn(async () => { throw new Error('not used in apply test') }),
       captureFullPage: vi.fn(async () => { throw new Error('not used in apply test') }),
       beginPaste: vi.fn(async () => { throw new Error('not used in apply test') }),

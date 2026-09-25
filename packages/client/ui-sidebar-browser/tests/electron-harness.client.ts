@@ -24,6 +24,7 @@ export function electronFixture(initial?: BrowserTabState) {
     inspectForeignText: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string): Promise<BrowserForeignText> => ({
       fingerprint: frameAudit.fingerprint, frames: [],
     })),
+    locateForeign: vi.fn(async () => { throw new Error('not used in this harness') }),
     captureViewport: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
       url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
       viewport: { width: 1, height: 1 },

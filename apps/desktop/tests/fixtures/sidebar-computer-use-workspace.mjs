@@ -333,6 +333,13 @@ async function qualify() {
     assert.equal(crossText.result?.isError, false, JSON.stringify(crossText.result))
     assert.equal(crossText.result?.value?.ok, true, JSON.stringify(crossText.result))
     assert.match(crossText.result.value.result, /FOREIGN_ROLES_OK/)
+    const crossLocate = await control('/invoke', { sessionId,
+      code: `let frame = t.playwright.frameLocator('#foreign'); let button = frame.getByRole('button',{name:'Cross-origin frame',exact:true}); let count = await button.count(); let label = await button.innerText(); let checked = await frame.getByRole('checkbox',{name:'Foreign flag',exact:true}).isChecked(); if(count !== 1 || label !== 'Cross-origin frame' || !await button.isVisible() || !await button.isEnabled() || checked) throw Error('FOREIGN_LOCATOR_MISSING_' + count + '_' + label); return 'FOREIGN_LOCATOR_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-locator.json'),
+      JSON.stringify({ sessionId, tool: crossLocate }, null, 2))
+    assert.equal(crossLocate.result?.isError, false, JSON.stringify(crossLocate.result))
+    assert.equal(crossLocate.result?.value?.ok, true, JSON.stringify(crossLocate.result))
+    assert.match(crossLocate.result.value.result, /FOREIGN_LOCATOR_OK/)
     const foreignPoint = await window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(crossUrl)})
         .executeJavaScript('(() => { const rect = document.getElementById("foreign").getBoundingClientRect(); return [Math.round(rect.left + 65),Math.round(rect.top + 20)]; })()')`)

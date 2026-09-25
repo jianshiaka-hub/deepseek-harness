@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, readBrowserForeignText,
+import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, locateBrowserForeignFrame,
+  readBrowserForeignText,
   type ViewportCaptureGuest } from '../src/browser-full-page.ts'
 
 const url = 'https://example.test/page'
@@ -158,6 +159,32 @@ describe('main-owned Sidebar full-page capture', () => {
     })
     await expect(readBrowserForeignText(h.guest, url,
       ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_NAVIGATED')
+  })
+
+  it('binds foreign locators to a unique named native frame and rejects ambiguous twins', async () => {
+    const h = fixture()
+    const foreignUrl = 'https://embedded.test/widget'
+    const first = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: foreignUrl, name: 'first', framesInSubtree: [],
+      executeJavaScript: vi.fn(async () => ({ url: foreignUrl, title: 'Widget', count: 1,
+        rows: [{ ref: 'd4-12345678:button:Open', role: 'button', name: 'Open' }] })) }
+    const second = { ...first, frameTreeNodeId: 3, name: 'second',
+      executeJavaScript: vi.fn(async () => { throw new Error('wrong foreign frame') }) }
+    Object.assign(h.frame, { frames: [second, first] })
+    h.frame.framesInSubtree.push(first, second)
+    Object.assign(h.frame, { executeJavaScript: vi.fn(async () => ({ src: foreignUrl, name: 'first' })) })
+    const query = { method: 'getByRole' as const, value: 'button', name: 'Open', exact: true,
+      frames: ['#first'] }
+    const approved = ['https://example.test', 'https://embedded.test']
+    await expect(locateBrowserForeignFrame(h.guest, url, query, ['https://example.test']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    const result = await locateBrowserForeignFrame(h.guest, url, query, approved)
+    expect(result.rows[0]?.ref).toMatch(/^x2-[a-f0-9]{64}\/d4-12345678:button:Open$/u)
+    expect(first.executeJavaScript).toHaveBeenCalledTimes(1)
+    expect(second.executeJavaScript).not.toHaveBeenCalled()
+    second.name = 'first'
+    await expect(locateBrowserForeignFrame(h.guest, url, query, approved))
+      .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
   })
 
   it('bounds viewport pixels and rejects a frame that changes while the native capture runs', async () => {
