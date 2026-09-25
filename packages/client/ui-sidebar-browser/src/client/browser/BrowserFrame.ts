@@ -126,6 +126,7 @@ export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly scopes?: readonly BrowserLocateSelector[]
   readonly projection?: 'visible' | 'enabled' | 'checked'
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
+  readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
 }
 
 export interface BrowserLocateResult {

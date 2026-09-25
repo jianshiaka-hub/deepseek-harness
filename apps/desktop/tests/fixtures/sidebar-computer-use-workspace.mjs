@@ -135,6 +135,12 @@ async function qualify() {
     assert.equal(visible.result?.isError, false, JSON.stringify(visible.result))
     assert.match(visible.result?.value?.result ?? '', /VISIBILITY_1_0_1/)
     assert.equal(visible.approvals.filter(approval => approval.allowed).length, 0)
+    const combined = await control('/invoke', { sessionId,
+      code: `return 'COMPOSE_' + [await t.playwright.getByRole('button',{name:'Click test button',exact:true}).and(t.playwright.locator('#action')).count(),await t.playwright.locator('#action').and(t.playwright.locator('#generic')).count(),await t.playwright.locator('#action').or(t.playwright.locator('#generic')).count(),await t.playwright.locator('#action').or(t.playwright.locator('#action')).count(),await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame action',exact:true}).and(t.playwright.frameLocator('#inner').locator('button')).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-combined-locator.json'), JSON.stringify({ sessionId, tool: combined }, null, 2))
+    assert.equal(combined.result?.isError, false, JSON.stringify(combined.result))
+    assert.match(combined.result?.value?.result ?? '', /COMPOSE_1_0_2_1_1/)
+    assert.equal(combined.approvals.filter(approval => approval.allowed).length, 0)
     const relative = await control('/invoke', { sessionId,
       code: `let section = t.playwright.getByTestId('group-a'); let inner = t.playwright.getByTestId('duplicate'); return 'RELATIVE_' + [await section.filter({has:inner}).count(),await section.filter({hasNot:inner}).count()].join('_');` })
     await writeFile(join(root, 'computer-use-relative-locate.json'), JSON.stringify({ sessionId, tool: relative }, null, 2))

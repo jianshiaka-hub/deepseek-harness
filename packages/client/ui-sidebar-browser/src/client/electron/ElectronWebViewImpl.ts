@@ -60,6 +60,29 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
             !('filter' in nested) && validSidebarLocateSelector(nested)))
 }
 
+function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
+  return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'combine']) &&
+    (query.projection === undefined || ['visible', 'enabled', 'checked'].includes(query.projection)) &&
+    (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
+      query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
+    (query.position === undefined || query.position !== null &&
+      ['first', 'last', 'nth'].includes(query.position.method) &&
+      (query.position.method === 'nth'
+        ? Number.isSafeInteger(query.position.index) && query.position.index !== undefined &&
+          query.position.index >= 0 && query.position.index <= 99999
+        : query.position.index === undefined)) &&
+    (query.frames === undefined || Array.isArray(query.frames) && query.frames.length >= 1 &&
+      query.frames.length <= 8 && query.frames.every(frame => typeof frame === 'string' &&
+        frame.trim().length > 0 && frame.length <= 256)) &&
+    (query.combine === undefined || allowCombine && query.combine !== null &&
+      typeof query.combine === 'object' && !Array.isArray(query.combine) &&
+      Object.keys(query.combine).length === 2 &&
+      Object.keys(query.combine).every(key => ['method', 'query'].includes(key)) &&
+      ['and', 'or'].includes(query.combine.method) &&
+      validSidebarLocateQuery(query.combine.query, false) &&
+      JSON.stringify(query.frames ?? []) === JSON.stringify(query.combine.query.frames ?? []))
+}
+
 /** Executed inside the guest; frame DOM is included only when the browser itself grants same-origin access. */
 const guestDomHelpers = String.raw`
   const sidebarSelector = 'a,button,input,textarea,select,[role],[contenteditable],h1,h2,h3';
@@ -369,24 +392,13 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (element === undefined || !this.ready || this.lifetime.signal.aborted ||
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    if (!validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection']) ||
-      query.projection !== undefined && !['visible', 'enabled', 'checked'].includes(query.projection) ||
-      query.scopes !== undefined && (!Array.isArray(query.scopes) || query.scopes.length < 1 ||
-        query.scopes.length > 2 || query.scopes.some(scope => !validSidebarLocateSelector(scope))) ||
-      query.position !== undefined &&
-      (!['first', 'last', 'nth'].includes(query.position.method) || query.position.method === 'nth' &&
-        (!Number.isSafeInteger(query.position.index) || query.position.index === undefined ||
-          query.position.index < 0 || query.position.index > 99999)) ||
-      query.frames !== undefined && (!Array.isArray(query.frames) || query.frames.length < 1 ||
-        query.frames.length > 8 || query.frames.some(frame => typeof frame !== 'string' ||
-          frame.trim().length < 1 || frame.length > 256))) {
+    if (!validSidebarLocateQuery(query)) {
       throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
     }
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
       const query = ${JSON.stringify(query)};
-      const selectors = [...(query.scopes || []),query];
       const normalize = (value) => String(value || '').trim().replace(/\\s+/g,' ');
       const textMatches = (value,needle,exact) => exact
         ? normalize(value) === normalize(needle)
@@ -418,7 +430,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
         }
         return textMatches(text,selector.value,selector.exact);
       };
-      const matches = (node,selector,step) => {
+      const matches = (node,selector,step,nestedResults) => {
         if (!matchesBase(node,selector)) return false;
         const filter = selector.filter;
         if (!filter) return true;
@@ -448,7 +460,6 @@ export class ElectronWebViewImpl implements BrowserFrame {
         frameNodes.push(frames[0]);
         doc = child;
       }
-      let count = 0, first = null, last = null, nth = null;
       const nodes = sidebarAllNodes(doc);
       const nestedDescendants = nested => {
         if (nested === undefined) return null;
@@ -461,22 +472,42 @@ export class ElectronWebViewImpl implements BrowserFrame {
         }
         return containing;
       };
-      const nestedResults = selectors.map(selector => ({
-        has:nestedDescendants(selector.filter?.has),
-        hasNot:nestedDescendants(selector.filter?.hasNot),
-      }));
-      const states = new WeakMap();
-      for (const [index,node] of nodes.entries()) {
-        const inherited = states.get(node.parentElement) || 0;
-        let state = inherited, matchedFinal = false;
-        for (let step = 0; step < selectors.length; step++) {
-          if (step > 0 && !(inherited & (1 << (step - 1)))) continue;
-          if (!matches(node,selectors[step],step)) continue;
-          state |= 1 << step;
-          if (step === selectors.length - 1) matchedFinal = true;
+      const matchChain = selectors => {
+        const nestedResults = selectors.map(selector => ({
+          has:nestedDescendants(selector.filter?.has),
+          hasNot:nestedDescendants(selector.filter?.hasNot),
+        }));
+        const states = new WeakMap(), matched = new Set();
+        for (const node of nodes) {
+          const inherited = states.get(node.parentElement) || 0;
+          let state = inherited;
+          for (let step = 0; step < selectors.length; step++) {
+            if (step > 0 && !(inherited & (1 << (step - 1)))) continue;
+            if (!matches(node,selectors[step],step,nestedResults)) continue;
+            state |= 1 << step;
+            if (step === selectors.length - 1) matched.add(node);
+          }
+          states.set(node,state);
         }
-        states.set(node,state);
-        if (!matchedFinal) continue;
+        return matched;
+      };
+      const positionChain = (matched,position) => {
+        if (position === undefined) return matched;
+        const ordered = [...matched];
+        const chosen = position.method === 'first' ? ordered[0]
+          : position.method === 'last' ? ordered.at(-1) : ordered[position.index];
+        return chosen === undefined ? new Set() : new Set([chosen]);
+      };
+      const primary = matchChain([...(query.scopes || []),query]);
+      const secondary = query.combine === undefined ? null : positionChain(
+        matchChain([...(query.combine.query.scopes || []),query.combine.query]),
+        query.combine.query.position);
+      let count = 0, first = null, last = null, nth = null;
+      for (const [index,node] of nodes.entries()) {
+        const included = secondary === null ? primary.has(node)
+          : query.combine.method === 'and' ? primary.has(node) && secondary.has(node)
+            : primary.has(node) || secondary.has(node);
+        if (!included) continue;
         const candidate = {doc,prefix,index,node};
         if (count === 0) first = candidate;
         if (query.position?.method === 'nth' && count === query.position.index) nth = candidate;
