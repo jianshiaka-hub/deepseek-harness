@@ -165,6 +165,11 @@ export function apply(ctx: Context): void {
         return controller.action(tabId, command.expectedUrl,
           { op: 'setValue', ref: command.args.ref, value: command.args.value }, stillSelected)
       }
+      if (command.op === 'selectOption') {
+        if (command.args.options === undefined) throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
+        return controller.action(tabId, command.expectedUrl,
+          { op: 'selectOption', ref: command.args.ref, options: command.args.options }, stillSelected)
+      }
       if (command.op === 'selectText') {
         if (command.args.text === undefined) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,

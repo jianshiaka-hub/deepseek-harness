@@ -54,6 +54,7 @@ export type BrowserDomAction =
     readonly to: { readonly x: number; readonly y: number }
   }
   | { readonly op: 'setValue'; readonly ref: string; readonly value: string }
+  | { readonly op: 'selectOption'; readonly ref: string; readonly options: readonly BrowserOptionSelector[] }
   | {
     readonly op: 'selectText'
     readonly ref: string
@@ -81,6 +82,14 @@ export interface BrowserDomActionResult {
   readonly clipboardSuperseded?: boolean
   /** True only when Chromium dispatched the intercepted HTML drag data to the destination. */
   readonly dropDispatched?: boolean
+  readonly selected?: readonly string[]
+}
+
+/** One bounded option matcher; every supplied field must match the same option. */
+export interface BrowserOptionSelector {
+  readonly value?: string
+  readonly label?: string
+  readonly index?: number
 }
 
 export type { BrowserPageScreenshot, BrowserScreenshotClip } from '../../types.ts'

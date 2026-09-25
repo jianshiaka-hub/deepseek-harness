@@ -585,6 +585,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (action.op === 'type') return this.nativeType(element, expectedUrl, action, stillSelected)
     if (action.op === 'paste') return this.nativePaste(element, expectedUrl, action, stillSelected)
     if (action.op === 'setValue') return this.nativeSetValue(element, expectedUrl, action, stillSelected)
+    if (action.op === 'selectOption') return this.nativeSelectOption(element, expectedUrl, action, stillSelected)
     if (action.op === 'selectText') return this.nativeSelectText(element, expectedUrl, action, stillSelected)
     if (action.op === 'secondary') return this.nativeSecondary(element, expectedUrl, action, stillSelected)
     if (action.op === 'key') return this.nativeKey(element, expectedUrl, action, stillSelected)
@@ -1076,6 +1077,61 @@ export class ElectronWebViewImpl implements BrowserFrame {
       await element.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
     }
     return { url: expectedUrl, title: selected.title, performed: true }
+  }
+
+  private async nativeSelectOption(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'selectOption' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.options.length > 20 || action.options.some(spec =>
+      Object.keys(spec).length < 1 || Object.values(spec).every(value => value === undefined) ||
+      Object.keys(spec).some(key => !['value', 'label', 'index'].includes(key)) ||
+      spec.value !== undefined && (typeof spec.value !== 'string' || spec.value.length > 120) ||
+      spec.label !== undefined && (typeof spec.label !== 'string' || spec.label.length > 120) ||
+      spec.index !== undefined && (!Number.isSafeInteger(spec.index) || spec.index < 0 || spec.index > 999))) {
+      throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
+    }
+    const code = `(() => {
+      if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
+      ${guestDomHelpers}
+      const {node,doc} = sidebarResolveRef(${JSON.stringify(action.ref)});
+      const selectors = ${JSON.stringify(action.options)};
+      if (node.tagName !== 'SELECT' || node.disabled || node.options.length > 1000 ||
+        (!node.multiple && selectors.length !== 1)) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+      const options = [...node.options];
+      const targets = selectors.map(spec => {
+        const matches = options.filter((option,index) =>
+          (spec.value === undefined || option.value === spec.value) &&
+          (spec.label === undefined || option.label === spec.label) &&
+          (spec.index === undefined || index === spec.index) &&
+          !option.disabled && !(option.parentElement?.tagName === 'OPTGROUP' && option.parentElement.disabled));
+        if (matches.length !== 1) throw new Error('SIDEBAR_OPTION_NOT_UNIQUE');
+        return matches[0];
+      });
+      if (new Set(targets).size !== targets.length) throw new Error('SIDEBAR_OPTION_NOT_UNIQUE');
+      const indices = targets.map(option => options.indexOf(option)).sort((a,b) => a-b);
+      node.focus();
+      if (doc.activeElement !== node) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+      if (node.multiple) {
+        const selected = new Set(targets);
+        for (const option of options) option.selected = selected.has(option);
+      } else node.selectedIndex = indices[0];
+      node.dispatchEvent(new Event('input',{bubbles:true}));
+      node.dispatchEvent(new Event('change',{bubbles:true}));
+      const after = options.flatMap((option,index) => option.selected ? [index] : []);
+      if (!node.isConnected || after.length !== indices.length ||
+        after.some((index,position) => index !== indices[position]) ||
+        location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED');
+      const selected = after.map(index => options[index].value);
+      if (selected.some(value => value.length > 120)) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+      return {url:location.href,title:document.title.slice(0,512),performed:true,selected};
+    })()`
+    const result = await element.executeJavaScript(code)
+    if (result === null || typeof result !== 'object' || !('url' in result) || result.url !== expectedUrl ||
+      !('title' in result) || typeof result.title !== 'string' ||
+      !('selected' in result) || !Array.isArray(result.selected) ||
+      result.selected.length > 20 || result.selected.some(value => typeof value !== 'string' || value.length > 120) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED')
+    return { url: expectedUrl, title: result.title, performed: true, selected: result.selected }
   }
 
   private async nativeSelectText(element: WebviewElement, expectedUrl: string,

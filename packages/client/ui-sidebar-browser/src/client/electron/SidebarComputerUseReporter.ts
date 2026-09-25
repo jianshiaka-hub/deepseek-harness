@@ -39,7 +39,7 @@ interface Command {
   readonly id: string
   readonly sessionId: string
   readonly tabId: string
-  readonly op: 'inspect' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'dialog' | 'dialogAction'
+  readonly op: 'inspect' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'dialog' | 'dialogAction'
   readonly expectedUrl: string
   readonly args: {
     readonly approvedOrigin: string
@@ -53,6 +53,7 @@ interface Command {
     readonly text?: string
     readonly format?: 'text' | 'md' | 'html'
     readonly value?: string
+    readonly options?: readonly { readonly value?: string; readonly label?: string; readonly index?: number }[]
     readonly prefix?: string
     readonly suffix?: string
     readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
