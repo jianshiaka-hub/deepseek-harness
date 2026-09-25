@@ -11,7 +11,7 @@ import { JSDOM } from 'jsdom'
 
 const pluginDirectory = process.env.DSH_COMPUTER_USE_PLUGIN_DIR
 if (!pluginDirectory) throw new Error('Set DSH_COMPUTER_USE_PLUGIN_DIR to the Computer Use plugin checkout')
-const page = new JSDOM('<!doctype html><title>Fallback</title><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div><img alt="Playwright logo"><span title="Issues count">25</span><div alt="Playwright logo">Unrelated alt</div>', { url: 'https://example.test/' })
+const page = new JSDOM('<!doctype html><title>Fallback</title><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div><img alt="Playwright logo"><span title="Issues count">25</span><div alt="Playwright logo">Unrelated alt</div><label for="account">Account name</label><input id="account"><span id="action-word">Action</span><span id="detail-word">details</span><button aria-labelledby="action-word detail-word" aria-label="Wrong name">X</button><label><input type="checkbox">Subscribe</label><button><img alt="Search"></button><input type="submit" value="Send form">', { url: 'https://example.test/' })
 for (const node of page.window.document.querySelectorAll('.inner')) {
   Object.defineProperty(node, 'innerText', { value: 'Shared', configurable: true })
 }
@@ -28,9 +28,17 @@ const queries = [
   { method: 'getByRole', value: 'img', name: 'Playwright logo', exact: true },
   { method: 'getByTitle', value: 'Issues', exact: false },
   { method: 'getByTitle', value: 'issues count', exact: true },
+  { method: 'getByRole', value: 'textbox', name: 'Account name', exact: true },
+  { method: 'getByRole', value: 'button', name: 'Action details', exact: true },
+  { method: 'getByRole', value: 'button', name: 'Wrong name', exact: true },
+  { method: 'getByRole', value: 'checkbox', name: 'Subscribe', exact: true },
+  { method: 'getByRole', value: 'button', name: 'Search', exact: true },
+  { method: 'getByRole', value: 'button', name: 'Send form', exact: true },
+  { method: 'getByLabel', value: 'Account name', exact: true },
+  { method: 'getByLabel', value: 'Wrong name', exact: true },
 ]
 const commands = queries.map((query, index) => ({
-  id: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}`, sessionId: 'session-a', tabId: 'tab-a',
+  id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`, sessionId: 'session-a', tabId: 'tab-a',
   op: 'locate', expectedUrl: url, args: { approvedOrigin: page.window.location.origin, query },
 }))
 const completions = []
@@ -76,8 +84,8 @@ try {
   }
   assert.equal(completions.length, queries.length, 'all selected-tab fallback queries completed')
   assert.ok(completions.every(result => result.ok), JSON.stringify(completions.map(result => result.error)))
-  assert.deepEqual(completions.map(result => result.value.count), [1, 0, 1, 1, 1, 0, 1, 1, 0])
-  process.stdout.write('Official-shell plugin fallback locators PASS: relative 1/0/1, attributes 1/1/0/1/1/0\n')
+  assert.deepEqual(completions.map(result => result.value.count), [1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0])
+  process.stdout.write('Official-shell plugin fallback locators PASS: relative, attributes, accessible names\n')
 } finally {
   await dispose?.()
   page.window.close()

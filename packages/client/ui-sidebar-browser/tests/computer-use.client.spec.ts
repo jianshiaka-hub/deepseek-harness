@@ -94,6 +94,45 @@ it('locates image alternative text and title attributes without matching unrelat
   } finally { await h.dispose(); fixture.remove() }
 })
 
+it('uses bounded associated labels and aria-labelledby for role names', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<label for="account">Account name</label><input id="account">' +
+    '<span id="action-word">Action</span><span id="detail-word">details</span>' +
+    '<button aria-labelledby="action-word detail-word" aria-label="Wrong name">X</button>' +
+    '<label><input type="checkbox">Subscribe</label>' +
+    '<button><img alt="Search"></button><input type="submit" value="Send form">'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    for (const [method, value, name, count] of [
+      ['getByRole', 'textbox', 'Account name', 1],
+      ['getByRole', 'button', 'Action details', 1],
+      ['getByRole', 'button', 'Wrong name', 0],
+      ['getByRole', 'checkbox', 'Subscribe', 1],
+      ['getByRole', 'button', 'Search', 1],
+      ['getByRole', 'button', 'Send form', 1],
+    ] as const) {
+      expect((await h.frame.locate?.(url, { method, value, name, exact: true }))?.count).toBe(count)
+    }
+    expect((await h.frame.locate?.(url, { method: 'getByLabel', value: 'Account name', exact: true }))?.count)
+      .toBe(1)
+    expect((await h.frame.locate?.(url, { method: 'getByLabel', value: 'Wrong name', exact: true }))?.count)
+      .toBe(0)
+  } finally { await h.dispose(); fixture.remove() }
+})
+
 it('reads top-level text and refs, acts on a matching ref, and refuses navigation or stale refs', async () => {
   const h = electronFixture()
   const button = document.createElement('button')

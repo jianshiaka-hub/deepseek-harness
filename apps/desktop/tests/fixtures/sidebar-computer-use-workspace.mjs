@@ -136,6 +136,22 @@ async function qualify() {
     assert.equal(attribute.result?.value?.ok, true, JSON.stringify(attribute.result))
     assert.match(attribute.result.value.result, /ATTR_1_1_0_1_1_1_0/)
     assert.equal(attribute.approvals.filter(approval => approval.allowed).length, 0)
+    const accessibleFixture = '<label for="account">Account name</label><input id="account">' +
+      '<span id="action-word">Action</span><span id="detail-word">details</span>' +
+      '<button aria-labelledby="action-word detail-word" aria-label="Wrong name">X</button>' +
+      '<label><input type="checkbox">Subscribe</label>' +
+      '<button><img alt="Search"></button><input type="submit" value="Send form">'
+    const appendAccessibleFixture = `document.body.insertAdjacentHTML('beforeend', ${JSON.stringify(accessibleFixture)})`
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript(${JSON.stringify(appendAccessibleFixture)})`)
+    const accessible = await control('/invoke', { sessionId,
+      code: `return 'A11Y_' + [await t.playwright.getByRole('textbox',{name:'Account name',exact:true}).count(),await t.playwright.getByRole('button',{name:'Action details',exact:true}).count(),await t.playwright.getByRole('button',{name:'Wrong name',exact:true}).count(),await t.playwright.getByRole('checkbox',{name:'Subscribe',exact:true}).count(),await t.playwright.getByRole('button',{name:'Search',exact:true}).count(),await t.playwright.getByRole('button',{name:'Send form',exact:true}).count(),await t.playwright.getByLabel('Account name',{exact:true}).count(),await t.playwright.getByLabel('Wrong name',{exact:true}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-accessible-name-locate.json'), JSON.stringify({ sessionId, tool: accessible }, null, 2))
+    assert.equal(accessible.result?.isError, false, JSON.stringify(accessible.result))
+    assert.equal(accessible.result?.value?.ok, true, JSON.stringify(accessible.result))
+    assert.match(accessible.result.value.result, /A11Y_1_1_0_1_1_1_1_0/)
+    assert.equal(accessible.approvals.filter(approval => approval.allowed).length, 0)
     const visible = await control('/invoke', { sessionId,
       code: `return 'VISIBILITY_' + [await t.playwright.locator('#hidden').filter({visible:false}).count(),await t.playwright.locator('#hidden').filter({visible:true}).count(),await t.playwright.locator('#action').filter({visible:true}).count()].join('_');` })
     await writeFile(join(root, 'computer-use-visible-filter.json'), JSON.stringify({ sessionId, tool: visible }, null, 2))

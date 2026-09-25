@@ -135,14 +135,43 @@ const guestDomHelpers = String.raw`
     for (const char of material) hash = Math.imul(hash ^ char.charCodeAt(0),16777619);
     return (hash >>> 0).toString(16).padStart(8,'0');
   };
+  const sidebarLabelName = (node) => {
+    const ids = (node.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0,8);
+    if (ids.length) {
+      const linked = ids.map(id => {
+        const label = node.ownerDocument.getElementById(id);
+        return label ? (label.innerText || label.textContent || '').slice(0,160) : '';
+      }).join(' ').trim();
+      if (linked) return linked;
+    }
+    const aria = node.getAttribute('aria-label') || '';
+    if (aria.trim()) return aria;
+    const labels = node.labels ? [...node.labels].slice(0,8)
+      .map(label => (label.innerText || label.textContent || '').slice(0,160)).join(' ').trim() : '';
+    return labels;
+  };
+  const sidebarAccessibleName = (node) => {
+    const label = sidebarLabelName(node);
+    if (label) return label;
+    if (node.tagName === 'INPUT' && ['button','submit','reset'].includes(node.type) && node.value) return node.value;
+    if (['IMG','AREA'].includes(node.tagName) || node.tagName === 'INPUT' && node.type === 'image') {
+      const alt = node.getAttribute('alt') || '';
+      if (alt) return alt;
+    }
+    if (node.innerText) return node.innerText;
+    if (['BUTTON','A'].includes(node.tagName)) {
+      const image = node.querySelector('img[alt],input[type=image][alt]');
+      if (image?.getAttribute('alt')) return image.getAttribute('alt');
+    }
+    return node.getAttribute('title') || node.getAttribute('placeholder') || '';
+  };
   const sidebarDescribe = (node) => {
     const rawRole = node.getAttribute('role') || '';
     const role = /^[a-z][a-z0-9-]{0,31}$/.test(rawRole) ? rawRole :
-      node.tagName === 'INPUT' ? ({number:'spinbutton',range:'slider',checkbox:'checkbox',radio:'radio',image:'button'})[node.type] || 'textbox' :
+      node.tagName === 'INPUT' ? ({number:'spinbutton',range:'slider',checkbox:'checkbox',radio:'radio',image:'button',button:'button',submit:'button',reset:'button',search:'searchbox'})[node.type] || 'textbox' :
       ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
         (node.getAttribute('contenteditable') !== null ? 'textbox' : node.tagName.toLowerCase());
-    const name = (node.getAttribute('aria-label') || node.innerText || node.getAttribute('alt') ||
-      node.getAttribute('title') || node.getAttribute('placeholder') || '')
+    const name = sidebarAccessibleName(node)
       .trim().replace(/\s+/g, ' ').replaceAll('[ref=', '[ref =').slice(0, 60);
     return {role, name};
   };
@@ -437,12 +466,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
           text = node.getAttribute('alt') || '';
         }
         else if (selector.method === 'getByTitle') text = node.getAttribute('title') || '';
-        else if (selector.method === 'getByLabel') {
-          const labels = node.labels ? [...node.labels].map(label => label.innerText) : [];
-          const labelledBy = (node.getAttribute('aria-labelledby') || '').split(/\\s+/)
-            .map(id => id && node.ownerDocument.getElementById(id)?.innerText || '');
-          text = [node.getAttribute('aria-label') || '', ...labels, ...labelledBy].join(' ');
-        }
+        else if (selector.method === 'getByLabel') text = sidebarLabelName(node);
         return textMatches(text,selector.value,selector.exact);
       };
       const matches = (node,selector,step,nestedResults) => {
