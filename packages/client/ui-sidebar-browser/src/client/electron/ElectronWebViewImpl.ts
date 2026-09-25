@@ -1151,6 +1151,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeScroll(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'scroll' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.ref.startsWith('x')) return this.nativeForeignScroll(element, expectedUrl, action, stillSelected)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -1164,6 +1165,35 @@ export class ElectronWebViewImpl implements BrowserFrame {
       point.url !== expectedUrl || !('title' in point) || typeof point.title !== 'string' ||
       this.element !== element || this.lifetime.signal.aborted || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl || !stillSelected()) throw new Error('SIDEBAR_SELECTION_CHANGED')
+    await element.sendInputEvent({ type: 'mouseWheel', x: point.x, y: point.y,
+      deltaX: action.dx === 0 ? 0 : -action.dx, deltaY: action.dy === 0 ? 0 : -action.dy,
+      hasPreciseScrollingDeltas: true, canScroll: true })
+    return { url: expectedUrl, title: point.title, performed: true }
+  }
+
+  private async nativeForeignScroll(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'scroll' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || approved === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SCROLL_UNAVAILABLE')
+    const point = await this.bridge.foreignRefPoint(lease, expectedUrl, action.ref, approved)
+    if (point.url !== expectedUrl || !approved.includes(point.origin) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
+    const moved = await this.bridge.foreignRefPoint(lease, expectedUrl, action.ref, approved)
+    if (moved.fingerprint !== point.fingerprint || moved.origin !== point.origin ||
+      moved.x !== point.x || moved.y !== point.y ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_TARGET_MOVED')
+    }
+    if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== point.fingerprint ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
     await element.sendInputEvent({ type: 'mouseWheel', x: point.x, y: point.y,
       deltaX: action.dx === 0 ? 0 : -action.dx, deltaY: action.dy === 0 ? 0 : -action.dy,
       hasPreciseScrollingDeltas: true, canScroll: true })

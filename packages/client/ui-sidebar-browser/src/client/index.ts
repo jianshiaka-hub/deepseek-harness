@@ -201,7 +201,9 @@ export function apply(ctx: Context): void {
       }
       if (command.args.dx === undefined || command.args.dy === undefined) throw new Error('SIDEBAR_SCROLL_UNAVAILABLE')
       return controller.action(tabId, command.expectedUrl,
-        { op: 'scroll', ref: command.args.ref, dx: command.args.dx, dy: command.args.dy }, stillSelected)
+        { op: 'scroll', ref: command.args.ref, dx: command.args.dx, dy: command.args.dy,
+          ...(command.args.approvedFrameOrigins === undefined ? {}
+            : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
     },
   )
   if (reporter !== undefined) ctx.effect(() => {

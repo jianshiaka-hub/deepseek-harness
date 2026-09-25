@@ -94,7 +94,13 @@ export type BrowserDomAction =
     readonly numericOnly?: boolean
     readonly approvedFrameOrigins?: readonly string[]
   }
-  | { readonly op: 'scroll'; readonly ref: string; readonly dx: number; readonly dy: number }
+  | {
+    readonly op: 'scroll'
+    readonly ref: string
+    readonly dx: number
+    readonly dy: number
+    readonly approvedFrameOrigins?: readonly string[]
+  }
   /** Agent navigation runs in the current page so Chromium can emit beforeunload. */
   | { readonly op: 'navigate'; readonly method: 'goto' | 'back' | 'forward'; readonly url?: string }
 

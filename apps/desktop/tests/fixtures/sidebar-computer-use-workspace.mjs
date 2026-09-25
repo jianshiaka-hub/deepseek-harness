@@ -470,6 +470,26 @@ async function qualify() {
     assert.equal(crossShot.result?.isError, false, JSON.stringify(crossShot.result))
     assert.equal(crossShot.result?.value?.ok, true, JSON.stringify(crossShot.result))
     assert.match(crossShot.result.value.result, /CROSS_PNG_[1-9][0-9]*_[1-9][0-9]*/)
+    await foreignFrame.executeJavaScript(`document.body.insertAdjacentHTML('beforeend',
+      '<div style="height:1400px">Foreign scroll tail</div>')`)
+    const foreignScrollBefore = await foreignFrame.executeJavaScript('window.scrollY')
+    const topScrollBefore = await foreignGuest.mainFrame.executeJavaScript('window.scrollY')
+    const crossScroll = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).scroll('down',1); return 'FOREIGN_SCROLL_OK';` })
+    assert.equal(crossScroll.result?.isError, false, JSON.stringify(crossScroll.result))
+    assert.equal(crossScroll.result?.value?.ok, true, JSON.stringify(crossScroll.result))
+    assert.match(crossScroll.result.value.result, /FOREIGN_SCROLL_OK/)
+    assert.equal(crossScroll.approvals.filter(approval => approval.allowed).length,
+      crossShot.approvals.filter(approval => approval.allowed).length,
+      'Foreign-frame scroll uses approved site access without click or text confirmation')
+    await waitFor(() => foreignFrame.executeJavaScript(`window.scrollY > ${foreignScrollBefore}`),
+      'trusted foreign-frame wheel scroll', 5000)
+    const foreignScrollAfter = await foreignFrame.executeJavaScript('window.scrollY')
+    const topScrollAfter = await foreignGuest.mainFrame.executeJavaScript('window.scrollY')
+    assert.equal(topScrollAfter, topScrollBefore, 'foreign scroll must not move the top document')
+    await writeFile(join(root, 'computer-use-cross-origin-scroll.json'),
+      JSON.stringify({ sessionId, tool: crossScroll, foreignScrollBefore, foreignScrollAfter,
+        topScrollBefore, topScrollAfter }, null, 2))
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {
