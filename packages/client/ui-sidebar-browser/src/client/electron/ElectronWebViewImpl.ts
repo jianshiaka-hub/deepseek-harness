@@ -1165,7 +1165,8 @@ export class ElectronWebViewImpl implements BrowserFrame {
       this.element !== element || this.lifetime.signal.aborted || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl || !stillSelected()) throw new Error('SIDEBAR_SELECTION_CHANGED')
     await element.sendInputEvent({ type: 'mouseWheel', x: point.x, y: point.y,
-      deltaX: action.dx, deltaY: action.dy, hasPreciseScrollingDeltas: true, canScroll: true })
+      deltaX: action.dx === 0 ? 0 : -action.dx, deltaY: action.dy === 0 ? 0 : -action.dy,
+      hasPreciseScrollingDeltas: true, canScroll: true })
     return { url: expectedUrl, title: point.title, performed: true }
   }
 

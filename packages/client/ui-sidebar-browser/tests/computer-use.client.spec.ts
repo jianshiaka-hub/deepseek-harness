@@ -108,7 +108,7 @@ it('reads top-level text and refs, acts on a matching ref, and refuses navigatio
     expect(await h.frame.action?.(url, { op: 'scroll', ref: '0:button:Open', dx: 0, dy: 250 }))
       .toMatchObject({ performed: true })
     expect(nativeInput.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'mouseWheel', x: 50, y: 35,
-      deltaX: 0, deltaY: 250 })
+      deltaX: 0, deltaY: -250 })
     expect(await h.frame.action?.(url, { op: 'key', ref: '1:textbox:Name', key: 'Control+Enter' }))
       .toMatchObject({ performed: true })
     expect(nativeInput.mock.calls.at(-2)?.[0]).toMatchObject({ type: 'keyDown', keyCode: 'Enter',

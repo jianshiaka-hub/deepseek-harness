@@ -168,6 +168,15 @@ async function qualify() {
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
         .executeJavaScript('document.getElementById("name").value')`)
     assert.equal(value, 'Ada')
+    const scrolled = await control('/invoke', { sessionId,
+      code: `await t.getAXState({emit:false}); await t.scroll(1,'down',1); return 'scrolled';` })
+    await writeFile(join(root, 'computer-use-scroll.json'), JSON.stringify({ sessionId, tool: scrolled }, null, 2))
+    assert.equal(scrolled.result?.isError, false, JSON.stringify(scrolled.result))
+    assert.equal(scrolled.result?.value?.ok, true, JSON.stringify(scrolled.result))
+    assert.equal(scrolled.approvals.filter(approval => approval.allowed).length, 4)
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('window.scrollY > 0')`), 'selected Browser page scroll', 5000)
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {
