@@ -1,6 +1,19 @@
 /** Isolated Electron probe for exact-origin frame auditing and full-page pixels. */
 const { createServer } = require('node:http')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, nativeImage } = require('electron')
+
+function embeddedPixel(base64) {
+  const image = nativeImage.createFromBuffer(Buffer.from(base64, 'base64'))
+  const { width, height } = image.getSize()
+  if (width < 160 || height < 90) throw new Error('Capture dimensions are too small for embedded pixels')
+  const bitmap = image.toBitmap()
+  const pixel = (80 * width + 150) * 4
+  // Electron bitmap bytes are BGRA; the frame background is #00aa88.
+  if (bitmap[pixel] < 80 || bitmap[pixel] > 180 ||
+    bitmap[pixel + 1] < 130 || bitmap[pixel + 2] > 60) {
+    throw new Error('Approved capture omitted the cross-origin frame pixels')
+  }
+}
 
 async function listen(server) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -42,6 +55,7 @@ async function run() {
     const image = await captureBrowserFullPage(guest, url, undefined, [topOrigin, embeddedOrigin])
     if (!image.base64 || image.viewport.width < 1 || image.viewport.height < 1 ||
       guest.debugger.isAttached()) throw new Error('Approved capture invalid or debugger leaked')
+    embeddedPixel(image.base64)
     await captureBrowserViewport(guest, url).then(
       () => { throw new Error('Foreign viewport captured without its grant') },
       error => { if (error?.message !== 'SIDEBAR_FRAME_SITE_NOT_APPROVED') throw error })
@@ -49,6 +63,7 @@ async function run() {
     if (!viewport.base64 || viewport.viewport.width < 1 || viewport.viewport.height < 1) {
       throw new Error('Approved viewport capture invalid')
     }
+    embeddedPixel(viewport.base64)
     process.stdout.write('Electron cross-origin frame capture PASS\n')
     app.exit(0)
   } catch (error) {
