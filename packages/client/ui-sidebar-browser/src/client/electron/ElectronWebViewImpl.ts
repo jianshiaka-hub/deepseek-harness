@@ -62,7 +62,7 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
 
 function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
   return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'combine']) &&
-    (query.projection === undefined || ['visible', 'enabled', 'checked'].includes(query.projection)) &&
+    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text'].includes(query.projection)) &&
     (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
       query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
     (query.position === undefined || query.position !== null &&
@@ -534,6 +534,12 @@ export class ElectronWebViewImpl implements BrowserFrame {
               return aria === 'true';
             }
             throw new Error('SIDEBAR_CHECK_UNAVAILABLE');
+          })()} : {}),
+          ...(query.projection === 'text' ? {text:(() => {
+            if (!isVisible(node)) throw new Error('SIDEBAR_TEXT_NOT_VISIBLE');
+            const text = String(node.innerText ?? '');
+            if (text.length > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+            return text;
           })()} : {})}];
       })();
       return {url:location.href,title:document.title.slice(0,512),count,rows};

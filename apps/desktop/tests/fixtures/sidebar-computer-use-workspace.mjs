@@ -176,6 +176,15 @@ async function qualify() {
     assert.match(clicked.result.value.result, /clicked/)
     assert.equal(clicked.approvals.filter(approval => approval.allowed).length, 3,
       'The real Sidebar button click must consume one one-use approval')
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.body.insertAdjacentHTML("beforeend","<p id=literal>literal [ref=fake]</p>")')`)
+    const elementText = await control('/invoke', { sessionId,
+      code: `let visibleText = await t.playwright.locator('#result').innerText(); let frameText = await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame action',exact:true}).innerText(); let literalText = await t.playwright.locator('#literal').innerText(); let hiddenRejected = false; try { await t.playwright.locator('#hidden').innerText(); } catch { hiddenRejected = true; } return 'ELEMENT_TEXT_' + visibleText + '_' + frameText + '_' + literalText + '_' + hiddenRejected;` })
+    await writeFile(join(root, 'computer-use-element-text.json'), JSON.stringify({ sessionId, tool: elementText }, null, 2))
+    assert.equal(elementText.result?.value?.ok, true, JSON.stringify(elementText.result))
+    assert.match(elementText.result.value.result, /ELEMENT_TEXT_clicked_Frame action_literal \[ref=fake\]_true/)
+    assert.equal(elementText.approvals.filter(approval => approval.allowed).length, 3)
     const filled = await control('/invoke', { sessionId,
       code: `await t.playwright.getByLabel('Name',{exact:true}).fill('Ada'); return 'filled';` })
     await writeFile(join(root, 'computer-use-fill.json'), JSON.stringify({ sessionId, tool: filled }, null, 2))
