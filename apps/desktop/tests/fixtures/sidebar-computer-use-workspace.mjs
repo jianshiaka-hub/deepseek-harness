@@ -340,18 +340,28 @@ async function qualify() {
     assert.equal(crossLocate.result?.isError, false, JSON.stringify(crossLocate.result))
     assert.equal(crossLocate.result?.value?.ok, true, JSON.stringify(crossLocate.result))
     assert.match(crossLocate.result.value.result, /FOREIGN_LOCATOR_OK/)
+    const crossRefClick = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Cross-origin frame',exact:true}).click(); let clicked = await t.getAXState({emit:false}); if(!clicked.includes('foreign clicked 1')) throw Error('FOREIGN_REF_CLICK_NOT_OBSERVED'); return 'FOREIGN_REF_CLICK_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-ref-click.json'),
+      JSON.stringify({ sessionId, tool: crossRefClick }, null, 2))
+    assert.equal(crossRefClick.result?.isError, false, JSON.stringify(crossRefClick.result))
+    assert.equal(crossRefClick.result?.value?.ok, true, JSON.stringify(crossRefClick.result))
+    assert.match(crossRefClick.result.value.result, /FOREIGN_REF_CLICK_OK/)
+    assert.equal(crossRefClick.approvals.filter(approval => approval.allowed).length,
+      crossLocate.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame element click needs one-use action confirmation')
     const foreignPoint = await window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(crossUrl)})
         .executeJavaScript('(() => { const rect = document.getElementById("foreign").getBoundingClientRect(); return [Math.round(rect.left + 65),Math.round(rect.top + 20)]; })()')`)
     const crossClick = await control('/invoke', { sessionId,
-      code: `await t.click(${JSON.stringify(foreignPoint)}); let clicked = await t.getAXState({emit:false}); if(!clicked.includes('foreign clicked')) throw Error('FOREIGN_CLICK_NOT_OBSERVED'); return 'FOREIGN_CLICK_OK';` })
+      code: `await t.click(${JSON.stringify(foreignPoint)}); let coordinateState = await t.getAXState({emit:false}); if(!coordinateState.includes('foreign clicked 2')) throw Error('FOREIGN_CLICK_NOT_OBSERVED'); return 'FOREIGN_CLICK_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-click.json'),
       JSON.stringify({ sessionId, tool: crossClick }, null, 2))
     assert.equal(crossClick.result?.isError, false, JSON.stringify(crossClick.result))
     assert.equal(crossClick.result?.value?.ok, true, JSON.stringify(crossClick.result))
     assert.match(crossClick.result.value.result, /FOREIGN_CLICK_OK/)
     assert.equal(crossClick.approvals.filter(approval => approval.allowed).length,
-      crossText.approvals.filter(approval => approval.allowed).length + 1,
+      crossRefClick.approvals.filter(approval => approval.allowed).length + 1,
       'Foreign-frame coordinate click needs one-use action confirmation')
     assert.match(crossClick.approvals.at(-1).reason, /网页坐标/)
     const crossShot = await control('/invoke', { sessionId,

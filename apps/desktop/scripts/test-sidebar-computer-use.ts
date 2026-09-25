@@ -33,7 +33,7 @@ const manifest = JSON.parse(await readFile(join(repo, 'apps/desktop/package.json
 const pnpm = JSON.parse(await readFile(join(repo, 'apps/desktop/node_modules/pnpm/package.json'), 'utf8')) as { version: string }
 const embedded = createServer((_request, response) => {
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-  response.end('<body style="background:#0a8"><button onclick="document.getElementById(\'foreignResult\').textContent=\'foreign clicked\'">Cross-origin frame</button><p id="foreignResult">foreign idle</p><input type="checkbox" aria-label="Foreign flag"></body>')
+  response.end('<body style="background:#0a8"><button onclick="const result=document.getElementById(\'foreignResult\');result.textContent=\'foreign clicked \'+(Number(result.dataset.clicks||0)+1);result.dataset.clicks=String(Number(result.dataset.clicks||0)+1)">Cross-origin frame</button><p id="foreignResult">foreign idle</p><input type="checkbox" aria-label="Foreign flag"></body>')
 })
 await new Promise<void>((done, reject) => {
   embedded.once('error', reject)

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, locateBrowserForeignFrame,
+  pointForBrowserForeignRef,
   readBrowserForeignText,
   type ViewportCaptureGuest } from '../src/browser-full-page.ts'
 
@@ -184,6 +185,30 @@ describe('main-owned Sidebar full-page capture', () => {
     expect(second.executeJavaScript).not.toHaveBeenCalled()
     second.name = 'first'
     await expect(locateBrowserForeignFrame(h.guest, url, query, approved))
+      .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
+  })
+
+  it('resolves a fresh foreign element ref through only its unique native parent', async () => {
+    const h = fixture()
+    const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: 'https://embedded.test/widget', name: 'widget', parent: h.frame, framesInSubtree: [],
+      executeJavaScript: vi.fn(async () => ({ x: 10, y: 5 })) }
+    Object.assign(h.frame, { frames: [foreign],
+      executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+    h.frame.framesInSubtree.push(foreign)
+    const sites = ['https://example.test', 'https://embedded.test']
+    const ref = () => `x2-${auditBrowserFrames(h.guest, url, sites).fingerprint}/d4-12345678:button:Open`
+    await expect(pointForBrowserForeignRef(h.guest, url, ref(), ['https://example.test']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    const point = await pointForBrowserForeignRef(h.guest, url, ref(), sites)
+    expect(point).toMatchObject({ url, x: 31, y: 42, origin: 'https://embedded.test' })
+    expect(foreign.executeJavaScript).toHaveBeenCalledTimes(1)
+    await expect(pointForBrowserForeignRef(h.guest, url, `x2-${'0'.repeat(64)}/d4-12345678:button:Open`, sites))
+      .rejects.toThrow('SIDEBAR_STALE_REF')
+    const twin = { ...foreign, frameTreeNodeId: 3 }
+    h.frame.framesInSubtree.push(twin)
+    Object.assign(h.frame, { frames: [foreign, twin] })
+    await expect(pointForBrowserForeignRef(h.guest, url, ref(), sites))
       .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
   })
 

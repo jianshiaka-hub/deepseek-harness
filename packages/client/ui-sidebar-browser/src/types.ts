@@ -93,6 +93,16 @@ export interface BrowserLocateResult {
   }[]
 }
 
+/** Checked CSS-pixel target for a single approved foreign-frame element. */
+export interface BrowserForeignRefPoint {
+  readonly url: string
+  readonly title: string
+  readonly x: number
+  readonly y: number
+  readonly fingerprint: string
+  readonly origin: string
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -122,6 +132,9 @@ export interface DesktopBrowserBridge {
   /** Query one explicitly selected foreign frame after checking every embedded source. */
   locateForeign(lease: DesktopBrowserLeaseId, expectedUrl: string,
     query: BrowserLocateQuery, approvedOrigins: readonly string[]): Promise<BrowserLocateResult>
+  /** Revalidate one foreign element ref and resolve its visible point in the top guest viewport. */
+  foreignRefPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>

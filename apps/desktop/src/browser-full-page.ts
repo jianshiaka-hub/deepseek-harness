@@ -1,7 +1,7 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
-import { sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
   readonly detached: boolean
@@ -11,6 +11,7 @@ interface CaptureFrame {
   readonly framesInSubtree: CaptureFrame[]
   readonly frames?: CaptureFrame[]
   readonly name?: string
+  readonly parent?: CaptureFrame | null
   executeJavaScript?(code: string): Promise<unknown>
 }
 
@@ -178,6 +179,86 @@ export async function locateBrowserForeignFrame(guest: FullPageCaptureGuest, exp
   const rows = raw.rows as BrowserLocateResult['rows']
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), count: raw.count,
     rows: rows.map(row => ({ ...row, ref: prefix + row.ref })) }
+}
+
+/**
+ * Revalidate an observed foreign element and map its visible center through uniquely bound native parents.
+ * @param guest - Main-owned selected Browser guest.
+ * @param expectedUrl - Exact top-level URL approved by the Host.
+ * @param input - Fingerprinted foreign element reference.
+ * @param approvedOrigins - Exact source sites approved for the current frame tree.
+ * @returns Current visible point in the top guest viewport.
+ */
+export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint> {
+  const match = typeof input === 'string' && input.length <= 750
+    ? /^x(\d{1,10})-([a-f0-9]{64})\/(d\d{1,5}-[a-f0-9]{8}:[a-z][a-z0-9-]{0,31}:[^\]\s]{0,600})$/iu.exec(input)
+    : null
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  if (match[2] !== before) throw new Error('SIDEBAR_STALE_REF')
+  const id = Number(match[1])
+  const frames = guest.mainFrame.framesInSubtree
+  const leaf = frames.find(frame => frame.frameTreeNodeId === id)
+  if (leaf === undefined || leaf === guest.mainFrame || leaf.executeJavaScript === undefined) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const chain: { parent: CaptureFrame; child: CaptureFrame }[] = []
+  let current = leaf
+  while (current !== guest.mainFrame) {
+    const parent: CaptureFrame | null | undefined = current.parent
+    if (parent === undefined || parent === null || !frames.includes(parent) ||
+      chain.length >= 8 || !parent.frames?.includes(current)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    chain.push({ parent, child: current })
+    current = parent
+  }
+  if (!chain.some(step => step.parent.origin !== step.child.origin)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  const local = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[3])});
+    if (frames.length !== 0) throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+    const {x,y} = sidebarPoint(node,[]);
+    return {x,y};
+  })()`)
+  if (!record(local) || typeof local.x !== 'number' || typeof local.y !== 'number' ||
+    !Number.isFinite(local.x) || !Number.isFinite(local.y)) throw new Error('SIDEBAR_POINT_UNAVAILABLE')
+  let x = local.x
+  let y = local.y
+  for (const { parent, child } of chain) {
+    if (parent.executeJavaScript === undefined || parent.frames === undefined ||
+      parent.frames.filter(frame => !frame.detached && frame.url === child.url &&
+        frame.name === child.name).length !== 1) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
+    const offset = await parent.executeJavaScript(`(() => {
+      if (location.href !== ${JSON.stringify(parent.url)}) throw new Error('SIDEBAR_NAVIGATED');
+      const matches = [...document.querySelectorAll('iframe,frame')].filter(frame =>
+        frame.src === ${JSON.stringify(child.url)} &&
+        (frame.getAttribute('name') || '') === ${JSON.stringify(child.name)});
+      if (matches.length !== 1) throw new Error('SIDEBAR_FRAME_AMBIGUOUS');
+      const frame = matches[0], rect = frame.getBoundingClientRect();
+      if (getComputedStyle(frame).transform !== 'none' ||
+        Math.abs(rect.width - frame.offsetWidth) > 1 ||
+        Math.abs(rect.height - frame.offsetHeight) > 1) throw new Error('SIDEBAR_FRAME_UNAVAILABLE');
+      const x = ${JSON.stringify(x)}, y = ${JSON.stringify(y)};
+      if (x < 0 || y < 0 || x >= frame.clientWidth || y >= frame.clientHeight) {
+        throw new Error('SIDEBAR_POINT_OUT_OF_BOUNDS');
+      }
+      const px = rect.left + frame.clientLeft + x;
+      const py = rect.top + frame.clientTop + y;
+      if (px < 0 || py < 0 || px >= innerWidth || py >= innerHeight ||
+        document.elementFromPoint(px,py) !== frame) throw new Error('SIDEBAR_TARGET_OCCLUDED');
+      return {x:px,y:py};
+    })()`)
+    if (!record(offset) || typeof offset.x !== 'number' || typeof offset.y !== 'number' ||
+      !Number.isFinite(offset.x) || !Number.isFinite(offset.y)) throw new Error('SIDEBAR_POINT_UNAVAILABLE')
+    x = offset.x
+    y = offset.y
+  }
+  if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), x, y,
+    fingerprint: before, origin: leaf.origin }
 }
 
 /** Fixed, bounded child-frame inspection. Form values and element handles stay inside the page. */

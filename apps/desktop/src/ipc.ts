@@ -22,6 +22,7 @@ export const DESKTOP_IPC = {
   browserAuditFrames: 'dsh-desktop:browser-audit-frames',
   browserInspectForeignText: 'dsh-desktop:browser-inspect-foreign-text',
   browserLocateForeign: 'dsh-desktop:browser-locate-foreign',
+  browserForeignRefPoint: 'dsh-desktop:browser-foreign-ref-point',
   browserCaptureViewport: 'dsh-desktop:browser-capture-viewport',
   browserCaptureFullPage: 'dsh-desktop:browser-capture-full-page',
   browserPasteBegin: 'dsh-desktop:browser-paste-begin',

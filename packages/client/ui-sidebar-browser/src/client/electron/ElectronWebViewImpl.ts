@@ -1080,6 +1080,9 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeClick(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'click' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.ref?.startsWith('x')) {
+      return this.nativeForeignRefClick(element, expectedUrl, action, stillSelected)
+    }
     const lease = this.lease
     const approved = action.ref === undefined ? action.approvedFrameOrigins : undefined
     if (approved !== undefined && lease === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
@@ -1176,6 +1179,48 @@ export class ElectronWebViewImpl implements BrowserFrame {
     await element.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button, clickCount })
     await element.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button, clickCount })
     return { url: expectedUrl, title: point.title, performed: true }
+  }
+
+  private async nativeForeignRefClick(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'click' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const ref = action.ref
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || ref === undefined || approved === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const button = action.button ?? 'left'
+    const clickCount = action.count ?? 1
+    if (!['left', 'middle', 'right'].includes(button) || !Number.isSafeInteger(clickCount) ||
+      clickCount < 1 || clickCount > 3) throw new Error('SIDEBAR_CLICK_UNAVAILABLE')
+    const point = await this.bridge.foreignRefPoint(lease, expectedUrl, ref, approved)
+    if (point.url !== expectedUrl || !approved.includes(point.origin) ||
+      !Number.isFinite(point.x) || !Number.isFinite(point.y) ||
+      point.x < 0 || point.y < 0 || point.x > 8192 || point.y > 8192 ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_POINT_UNAVAILABLE')
+    }
+    await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
+    if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    const moved = await this.bridge.foreignRefPoint(lease, expectedUrl, ref, approved)
+    if (moved.url !== expectedUrl || moved.origin !== point.origin ||
+      moved.fingerprint !== point.fingerprint || moved.x !== point.x || moved.y !== point.y ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_TARGET_MOVED')
+    }
+    let pressed = false
+    try {
+      await element.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button, clickCount })
+      pressed = true
+      await element.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button, clickCount })
+      pressed = false
+    } finally {
+      if (pressed) await element.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button,
+        clickCount }).catch(() => {})
+    }
+    return { url: expectedUrl, title: moved.title, performed: true }
   }
 
   /** @returns after pending initialization and the owned guest have been released. */
