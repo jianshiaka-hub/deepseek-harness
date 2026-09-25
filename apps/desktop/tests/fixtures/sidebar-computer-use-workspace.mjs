@@ -148,6 +148,13 @@ async function qualify() {
     assert.equal(relative.result?.value?.ok, true, JSON.stringify(relative.result))
     assert.match(relative.result.value.result, /RELATIVE_1_0/)
     assert.equal(relative.approvals.filter(approval => approval.allowed).length, 0)
+    const nestedRelative = await control('/invoke', { sessionId,
+      code: `let chain = t.playwright.locator('.inner').filter({hasText:'Shared'}).getByTestId('duplicate'); return 'NESTED_RELATIVE_' + [await t.playwright.getByTestId('group-a').filter({has:chain}).count(),await t.playwright.getByTestId('group-b').filter({has:chain}).count(),await t.playwright.getByTestId('group-b').filter({hasNot:chain}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-nested-relative-locate.json'), JSON.stringify({ sessionId, tool: nestedRelative }, null, 2))
+    assert.equal(nestedRelative.result?.isError, false, JSON.stringify(nestedRelative.result))
+    assert.equal(nestedRelative.result?.value?.ok, true, JSON.stringify(nestedRelative.result))
+    assert.match(nestedRelative.result.value.result, /NESTED_RELATIVE_1_0_1/)
+    assert.equal(nestedRelative.approvals.filter(approval => approval.allowed).length, 0)
     const generic = await control('/invoke', { sessionId,
       code: `await t.playwright.locator('#generic').click(); return 'generic clicked';` })
     await writeFile(join(root, 'computer-use-generic-click.json'), JSON.stringify({ sessionId, tool: generic }, null, 2))

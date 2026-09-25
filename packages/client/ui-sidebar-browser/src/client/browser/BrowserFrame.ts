@@ -117,9 +117,26 @@ export interface BrowserLocateSelector {
     readonly hasText?: string
     readonly hasNotText?: string
     readonly visible?: boolean
-    readonly has?: Omit<BrowserLocateSelector, 'filter'>
-    readonly hasNot?: Omit<BrowserLocateSelector, 'filter'>
+    readonly has?: BrowserRelativeLocateQuery
+    readonly hasNot?: BrowserRelativeLocateQuery
   }
+}
+
+/** Local filters allowed within a relative locator, without another descendant query. */
+export interface BrowserRelativeLocateFilter {
+  readonly hasText?: string
+  readonly hasNotText?: string
+  readonly visible?: boolean
+}
+
+/** One selector inside a candidate; no nested frame or locator-valued filter. */
+export type BrowserRelativeLocateSelector = Omit<BrowserLocateSelector, 'filter'> & {
+  readonly filter?: BrowserRelativeLocateFilter
+}
+
+/** Up to three relative selector steps inside each candidate element. */
+export type BrowserRelativeLocateQuery = BrowserRelativeLocateSelector & {
+  readonly scopes?: readonly BrowserRelativeLocateSelector[]
 }
 
 /** A selector chain within the top document or explicit same-origin frames. */

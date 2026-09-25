@@ -9,6 +9,53 @@ function runGuestScript(code: string, context: Record<string, unknown>): unknown
   return result
 }
 
+it('bounds multi-step relative has filters to descendants of each candidate', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<div class="group"><section id="escaped" aria-label="Escaped section"><span class="item">Outside</span></section></div>' +
+    '<section id="matching" aria-label="Inside section"><div class="group"><span class="item">Inside</span></div></section>' +
+    '<section id="empty" aria-label="Empty section"><div class="group"></div></section>'
+  Object.defineProperty(fixture.querySelector('#matching .item'), 'innerText', { value: 'Inside', configurable: true })
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const relative = { method: 'locator' as const, value: '.item', exact: false,
+      scopes: [{ method: 'locator' as const, value: '.group', exact: false }] }
+    const has = await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { has: relative } })
+    expect(has?.count).toBe(1)
+    expect(has?.rows[0]?.name).toBe('Inside section')
+    const hasNot = await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { hasNot: relative } })
+    expect(hasNot?.count).toBe(2)
+    const refined = await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { has: { ...relative, filter: { hasText: 'Inside' } } } })
+    expect(refined?.count).toBe(1)
+    const crossFrameRelative = { ...relative, frames: ['iframe'] }
+    await expect(h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { has: crossFrameRelative } })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+    const nestedRelative = { ...relative,
+      filter: { hasText: 'Inside', has: { method: 'locator' as const, value: '.item', exact: false } } }
+    await expect(h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { has: nestedRelative } }))
+      .rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
 it('reads top-level text and refs, acts on a matching ref, and refuses navigation or stale refs', async () => {
   const h = electronFixture()
   const button = document.createElement('button')

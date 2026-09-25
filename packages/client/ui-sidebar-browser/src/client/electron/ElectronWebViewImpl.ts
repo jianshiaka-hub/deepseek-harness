@@ -39,7 +39,7 @@ function sidebarKeyEvent(value: string): { keyCode: string; modifiers: SidebarKe
     modifiers }
 }
 
-function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = []): boolean {
+function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = [], allowNested = true): boolean {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const selector = value as Record<string, unknown>
   const filter = selector.filter
@@ -56,8 +56,14 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
       Object.entries(filter).every(([key, nested]) =>
         key === 'visible' ? typeof nested === 'boolean' : ['hasText', 'hasNotText'].includes(key)
           ? typeof nested === 'string' && nested.length > 0 && nested.length <= 120
-          : ['has', 'hasNot'].includes(key) && nested !== null && typeof nested === 'object' &&
-            !('filter' in nested) && validSidebarLocateSelector(nested)))
+          : ['has', 'hasNot'].includes(key) && allowNested && validSidebarRelativeQuery(nested)))
+}
+
+function validSidebarRelativeQuery(value: unknown): boolean {
+  if (!validSidebarLocateSelector(value, ['scopes'], false)) return false
+  const scopes = (value as { readonly scopes?: unknown }).scopes
+  return scopes === undefined || Array.isArray(scopes) && scopes.length >= 1 &&
+    scopes.length <= 2 && scopes.every(scope => validSidebarLocateSelector(scope, [], false))
 }
 
 function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
@@ -463,16 +469,31 @@ export class ElectronWebViewImpl implements BrowserFrame {
         doc = child;
       }
       const nodes = sidebarAllNodes(doc);
-      const nestedDescendants = nested => {
-        if (nested === undefined) return null;
+      const ancestorsOf = selected => {
         const containing = new WeakSet();
         for (let index = nodes.length - 1; index >= 0; index--) {
           const node = nodes[index];
-          if ((matchesBase(node,nested) || containing.has(node)) && node.parentElement) {
+          if ((selected.has(node) || containing.has(node)) && node.parentElement) {
             containing.add(node.parentElement);
           }
         }
         return containing;
+      };
+      const nestedDescendants = nested => {
+        if (nested === undefined) return null;
+        const selectors = [...(nested.scopes || []),nested];
+        const empty = [{has:null,hasNot:null}];
+        let selected = null;
+        for (let step = selectors.length - 1; step >= 0; step--) {
+          const descendants = selected === null ? null : ancestorsOf(selected);
+          const matchesStep = new Set();
+          for (const node of nodes) {
+            if ((descendants === null || descendants.has(node)) &&
+              matches(node,selectors[step],0,empty)) matchesStep.add(node);
+          }
+          selected = matchesStep;
+        }
+        return ancestorsOf(selected);
       };
       const matchChain = selectors => {
         const nestedResults = selectors.map(selector => ({

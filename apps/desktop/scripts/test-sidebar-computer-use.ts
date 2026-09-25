@@ -2,7 +2,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -12,6 +12,16 @@ import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
 import { desktopTargetPlatform, developmentRuntimeDirectory, resolveDesktopBuildTarget } from './desktop-build-paths.mjs'
 
 const repo = resolve(import.meta.dirname, '../../..')
+for (const [name, workspacePath] of [
+  ['@deepseek-ai/dsh', 'apps/cli'],
+  ['@deepseek-ai/dsh-client-ui-sidebar-browser', 'packages/client/ui-sidebar-browser'],
+  ['@deepseek-ai/dsh-client-ui-sidebar-right', 'packages/client/ui-sidebar-right'],
+] as const) {
+  if (await realpath(join(repo, 'node_modules/.pnpm/node_modules', name)) !==
+    await realpath(join(repo, workspacePath))) {
+    throw new Error(`Sidebar Computer Use qualification requires current-worktree dependency: ${name}`)
+  }
+}
 const plugin = resolve(process.env.DSH_COMPUTER_USE_PLUGIN_DIR ?? join(repo, '../dsh-computer-use-safe'))
 const evidence = join(repo, 'apps/desktop/.desktop-build/qualification')
 await mkdir(evidence, { recursive: true })
@@ -27,7 +37,7 @@ const page = createServer((request, response) => {
     response.end('<!doctype html><button onclick="document.getElementById(\'frameResult\').textContent = \'frame clicked\'">Frame action</button><p id="frameResult">frame idle</p>')
     return
   }
-  response.end('<!doctype html><title>Isolated Computer Use</title><h1>Isolated Computer Use</h1><section data-testid="group-a"><p data-testid="duplicate">Shared</p></section><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section><div id="generic" onclick="this.setAttribute(\'data-state\',\'clicked\')">Generic tile</div><button id="action" data-testid="action" onclick="document.getElementById(\'result\').textContent = \'clicked\'">Click test button</button><p id="result">idle</p><input id="name" aria-label="Name" placeholder="Your name" type="text"><input id="agree" aria-label="Agree" type="checkbox"><select id="color" aria-label="Color" onchange="document.getElementById(&quot;selectedColor&quot;).textContent=this.value"><option value="red">Red</option><option value="blue">Blue</option></select><p id="selectedColor">red</p><select id="colors" aria-label="Colors" multiple onchange="document.getElementById(&quot;selectedColors&quot;).textContent=Array.from(this.selectedOptions).map(option=>option.value).join(&quot;,&quot;)"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option></select><p id="selectedColors">none</p><input id="disabled" aria-label="Disabled" disabled><div id="hidden" style="display:none">Hidden element</div><iframe id="inner" src="/frame"></iframe><div style="height:2000px">End of page</div>')
+  response.end('<!doctype html><title>Isolated Computer Use</title><h1>Isolated Computer Use</h1><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div><div id="generic" onclick="this.setAttribute(\'data-state\',\'clicked\')">Generic tile</div><button id="action" data-testid="action" onclick="document.getElementById(\'result\').textContent = \'clicked\'">Click test button</button><p id="result">idle</p><input id="name" aria-label="Name" placeholder="Your name" type="text"><input id="agree" aria-label="Agree" type="checkbox"><select id="color" aria-label="Color" onchange="document.getElementById(&quot;selectedColor&quot;).textContent=this.value"><option value="red">Red</option><option value="blue">Blue</option></select><p id="selectedColor">red</p><select id="colors" aria-label="Colors" multiple onchange="document.getElementById(&quot;selectedColors&quot;).textContent=Array.from(this.selectedOptions).map(option=>option.value).join(&quot;,&quot;)"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option></select><p id="selectedColors">none</p><input id="disabled" aria-label="Disabled" disabled><div id="hidden" style="display:none">Hidden element</div><iframe id="inner" src="/frame"></iframe><div style="height:2000px">End of page</div>')
 })
 await new Promise<void>((done, reject) => {
   page.once('error', reject)
