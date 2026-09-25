@@ -51,14 +51,16 @@ export interface BrowserLocateSelector {
   }
 }
 
-/** Local filters allowed within a relative locator, without another descendant query. */
+/** Local filters within a relative locator; descendant queries are bounded by validation depth. */
 export interface BrowserRelativeLocateFilter {
   readonly hasText?: string
   readonly hasNotText?: string
   readonly visible?: boolean
+  readonly has?: BrowserRelativeLocateQuery
+  readonly hasNot?: BrowserRelativeLocateQuery
 }
 
-/** One selector inside a candidate; no nested frame or locator-valued filter. */
+/** One selector inside a candidate; no nested frame or positional selector. */
 export type BrowserRelativeLocateSelector = Omit<BrowserLocateSelector, 'filter'> & {
   readonly filter?: BrowserRelativeLocateFilter
 }

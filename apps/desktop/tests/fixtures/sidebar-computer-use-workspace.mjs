@@ -178,6 +178,13 @@ async function qualify() {
     assert.equal(nestedRelative.result?.value?.ok, true, JSON.stringify(nestedRelative.result))
     assert.match(nestedRelative.result.value.result, /NESTED_RELATIVE_1_0_1/)
     assert.equal(nestedRelative.approvals.filter(approval => approval.allowed).length, 0)
+    const twiceNested = await control('/invoke', { sessionId,
+      code: `let nestedInner = t.playwright.locator('.inner').filter({has:t.playwright.getByTestId('duplicate')}); return 'TWICE_NESTED_' + [await t.playwright.getByTestId('group-a').filter({has:nestedInner}).count(),await t.playwright.getByTestId('group-b').filter({has:nestedInner}).count(),await t.playwright.getByTestId('group-b').filter({hasNot:nestedInner}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-twice-nested-relative-locate.json'),
+      JSON.stringify({ sessionId, tool: twiceNested }, null, 2))
+    assert.equal(twiceNested.result?.value?.ok, true, JSON.stringify(twiceNested.result))
+    assert.match(twiceNested.result.value.result, /TWICE_NESTED_1_0_1/)
+    assert.equal(twiceNested.approvals.filter(approval => approval.allowed).length, 0)
     const generic = await control('/invoke', { sessionId,
       code: `await t.playwright.locator('#generic').click(); return 'generic clicked';` })
     await writeFile(join(root, 'computer-use-generic-click.json'), JSON.stringify({ sessionId, tool: generic }, null, 2))

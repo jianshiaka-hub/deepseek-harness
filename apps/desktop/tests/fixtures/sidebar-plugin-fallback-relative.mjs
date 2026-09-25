@@ -18,10 +18,15 @@ for (const node of page.window.document.querySelectorAll('.inner')) {
 const url = page.window.location.href
 const relative = { method: 'getByTestId', value: 'duplicate', exact: false,
   scopes: [{ method: 'locator', value: '.inner', exact: false, filter: { hasText: 'Shared' } }] }
+const twiceNested = { method: 'locator', value: '.inner', exact: false,
+  filter: { has: { method: 'getByTestId', value: 'duplicate', exact: false } } }
 const queries = [
   { method: 'getByTestId', value: 'group-a', exact: false, filter: { has: relative } },
   { method: 'getByTestId', value: 'group-b', exact: false, filter: { has: relative } },
   { method: 'getByTestId', value: 'group-b', exact: false, filter: { hasNot: relative } },
+  { method: 'getByTestId', value: 'group-a', exact: false, filter: { has: twiceNested } },
+  { method: 'getByTestId', value: 'group-b', exact: false, filter: { has: twiceNested } },
+  { method: 'getByTestId', value: 'group-b', exact: false, filter: { hasNot: twiceNested } },
   { method: 'getByAltText', value: 'logo', exact: false },
   { method: 'getByAltText', value: 'Playwright logo', exact: true },
   { method: 'getByAltText', value: 'playwright logo', exact: true },
@@ -84,7 +89,8 @@ try {
   }
   assert.equal(completions.length, queries.length, 'all selected-tab fallback queries completed')
   assert.ok(completions.every(result => result.ok), JSON.stringify(completions.map(result => result.error)))
-  assert.deepEqual(completions.map(result => result.value.count), [1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0])
+  assert.deepEqual(completions.map(result => result.value.count),
+    [1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0])
   process.stdout.write('Official-shell plugin fallback locators PASS: relative, attributes, accessible names\n')
 } finally {
   await dispose?.()

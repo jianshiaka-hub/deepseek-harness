@@ -49,10 +49,17 @@ it('bounds multi-step relative has filters to descendants of each candidate', as
     const crossFrameRelative = { ...relative, frames: ['iframe'] }
     await expect(h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
       filter: { has: crossFrameRelative } })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
-    const nestedRelative = { ...relative,
-      filter: { hasText: 'Inside', has: { method: 'locator' as const, value: '.item', exact: false } } }
+    const nestedRelative = { method: 'locator' as const, value: '.group', exact: false,
+      filter: { has: { method: 'locator' as const, value: '.item', exact: false } } }
+    expect((await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { has: nestedRelative } }))?.count).toBe(1)
+    expect((await h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
+      filter: { hasNot: nestedRelative } }))?.count).toBe(2)
+    const tooDeep = { ...nestedRelative, filter: { has: { method: 'locator' as const,
+      value: '.item', exact: false, filter: { has: { method: 'locator' as const,
+        value: '.deep', exact: false } } } } }
     await expect(h.frame.locate?.(url, { method: 'locator', value: 'section', exact: false,
-      filter: { has: nestedRelative } }))
+      filter: { has: tooDeep } }))
       .rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
   } finally {
     await h.dispose()

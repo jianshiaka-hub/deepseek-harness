@@ -1,7 +1,7 @@
 /** Fixed document queries shared by the selected Webview and its native frame bridge. */
 import type { BrowserLocateQuery } from './types.ts'
 
-function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = [], allowNested = true): boolean {
+function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = [], depth = 0): boolean {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const selector = value as Record<string, unknown>
   const filter = selector.filter
@@ -18,14 +18,14 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
       Object.entries(filter).every(([key, nested]) =>
         key === 'visible' ? typeof nested === 'boolean' : ['hasText', 'hasNotText'].includes(key)
           ? typeof nested === 'string' && nested.length > 0 && nested.length <= 120
-          : ['has', 'hasNot'].includes(key) && allowNested && validSidebarRelativeQuery(nested)))
+          : ['has', 'hasNot'].includes(key) && depth < 2 && validSidebarRelativeQuery(nested, depth + 1)))
 }
 
-function validSidebarRelativeQuery(value: unknown): boolean {
-  if (!validSidebarLocateSelector(value, ['scopes'], false)) return false
+function validSidebarRelativeQuery(value: unknown, depth: number): boolean {
+  if (!validSidebarLocateSelector(value, ['scopes'], depth)) return false
   const scopes = (value as { readonly scopes?: unknown }).scopes
   return scopes === undefined || Array.isArray(scopes) && scopes.length >= 1 &&
-    scopes.length <= 2 && scopes.every(scope => validSidebarLocateSelector(scope, [], false))
+    scopes.length <= 2 && scopes.every(scope => validSidebarLocateSelector(scope, [], depth))
 }
 
 /**
@@ -295,14 +295,17 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
       const nestedDescendants = nested => {
         if (nested === undefined) return null;
         const selectors = [...(nested.scopes || []),nested];
-        const empty = [{has:null,hasNot:null}];
+        const nestedResults = selectors.map(selector => ({
+          has:nestedDescendants(selector.filter?.has),
+          hasNot:nestedDescendants(selector.filter?.hasNot),
+        }));
         let selected = null;
         for (let step = selectors.length - 1; step >= 0; step--) {
           const descendants = selected === null ? null : ancestorsOf(selected);
           const matchesStep = new Set();
           for (const node of nodes) {
             if ((descendants === null || descendants.has(node)) &&
-              matches(node,selectors[step],0,empty)) matchesStep.add(node);
+              matches(node,selectors[step],step,nestedResults)) matchesStep.add(node);
           }
           selected = matchesStep;
         }
