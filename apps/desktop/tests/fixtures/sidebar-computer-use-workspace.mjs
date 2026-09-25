@@ -122,11 +122,11 @@ async function qualify() {
     assert.equal(tool.result?.value?.ok, true, JSON.stringify(tool.result))
     assert.match(tool.result.value.result, /Isolated Computer Use/)
     const located = await control('/invoke', { sessionId,
-      code: `let allCount = await t.playwright.locator('*').count(); if (allCount < 10) throw Error('CSS_COUNT_INCOMPLETE_' + allCount); return 'LOCATORS_' + [await t.playwright.getByRole('button',{name:'Click test button',exact:true}).count(),await t.playwright.locator('#generic').count(),await t.playwright.getByText('idle',{exact:true}).count(),await t.playwright.getByLabel('Name',{exact:true}).count(),await t.playwright.getByPlaceholder('Your name',{exact:true}).count(),await t.playwright.getByTestId('action').count(),await t.playwright.getByRole('button',{name:'Frame action',exact:true}).count(),await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame action',exact:true}).count(),await t.playwright.getByRole('button').filter({hasText:'Click test'}).count(),await t.playwright.getByRole('button').filter({hasNotText:'Click test'}).count()].join('_');` })
+      code: `let allCount = await t.playwright.locator('*').count(); if (allCount < 10) throw Error('CSS_COUNT_INCOMPLETE_' + allCount); return 'LOCATORS_' + [await t.playwright.getByRole('button',{name:'Click test button',exact:true}).count(),await t.playwright.locator('#generic').count(),await t.playwright.getByText('idle',{exact:true}).count(),await t.playwright.getByLabel('Name',{exact:true}).count(),await t.playwright.getByPlaceholder('Your name',{exact:true}).count(),await t.playwright.getByTestId('action').count(),await t.playwright.getByRole('button',{name:'Frame action',exact:true}).count(),await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame action',exact:true}).count(),await t.playwright.getByRole('button').filter({hasText:'Click test'}).count(),await t.playwright.getByRole('button').filter({hasNotText:'Click test'}).count(),await t.playwright.getByTestId('group-a').getByTestId('duplicate').count(),await t.playwright.getByTestId('group-b').getByText('Shared',{exact:true}).count(),await t.playwright.getByTestId('group-a').getByTestId('group-b').count()].join('_');` })
     await writeFile(join(root, 'computer-use-locate.json'), JSON.stringify({ sessionId, tool: located }, null, 2))
     assert.equal(located.result?.isError, false, JSON.stringify(located.result))
     assert.equal(located.result?.value?.ok, true, JSON.stringify(located.result))
-    assert.match(located.result.value.result, /LOCATORS_1_1_1_1_1_1_0_1_1_0/)
+    assert.match(located.result.value.result, /LOCATORS_1_1_1_1_1_1_0_1_1_0_1_1_0/)
     assert.equal(located.approvals.filter(approval => approval.allowed).length, 0,
       'Read-only locator queries must not consume action approval')
     const generic = await control('/invoke', { sessionId,
@@ -150,7 +150,7 @@ async function qualify() {
         .executeJavaScript('document.getElementById("inner").contentDocument.getElementById("frameResult").textContent')`)
     assert.equal(frameState, 'frame clicked')
     const clicked = await control('/invoke', { sessionId,
-      code: `await t.playwright.locator('#action').click(); return await t.getAXState({emit:false});` })
+      code: `await t.playwright.locator('body').locator('#action').click(); return await t.getAXState({emit:false});` })
     await writeFile(join(root, 'computer-use-click.json'), JSON.stringify({ sessionId, tool: clicked }, null, 2))
     assert.equal(clicked.result?.isError, false, JSON.stringify(clicked.result))
     assert.equal(clicked.result?.value?.ok, true, JSON.stringify(clicked.result))
@@ -175,7 +175,9 @@ async function qualify() {
     if (window && !window.isDestroyed()) {
       await writeFile(join(root, 'failure-ui.json'), JSON.stringify(await window.webContents.executeJavaScript(`({
         buttons: [...document.querySelectorAll('button')].map(button => ({text: button.textContent?.trim(), label: button.getAttribute('aria-label')})),
-        text: document.body.innerText.slice(0, 1800), webviews: document.querySelectorAll('webview').length
+        text: document.body.innerText.slice(0, 1800),
+        address: document.querySelector('input[aria-label="输入 HTTP(S) 地址"]')?.value,
+        webviews: [...document.querySelectorAll('webview')].map(view => ({url:view.getURL(),loading:view.isLoading()}))
       })`), null, 2))
     }
     throw error

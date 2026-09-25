@@ -98,13 +98,17 @@ export interface BrowserDialogState {
   readonly dialog: BrowserJsDialog | null
 }
 
-export interface BrowserLocateQuery {
+export interface BrowserLocateSelector {
   readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByTestId'
   readonly value: string
   readonly name?: string
   readonly exact: boolean
-  readonly frames?: readonly string[]
   readonly filter?: { readonly hasText?: string; readonly hasNotText?: string }
+}
+
+export interface BrowserLocateQuery extends BrowserLocateSelector {
+  readonly frames?: readonly string[]
+  readonly scopes?: readonly BrowserLocateSelector[]
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
 }
 

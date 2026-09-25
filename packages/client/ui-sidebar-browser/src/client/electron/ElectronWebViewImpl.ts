@@ -39,6 +39,24 @@ function sidebarKeyEvent(value: string): { keyCode: string; modifiers: SidebarKe
     modifiers }
 }
 
+function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = []): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const selector = value as Record<string, unknown>
+  const filter = selector.filter
+  return typeof selector.method === 'string' &&
+    ['getByRole', 'locator', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByTestId'].includes(selector.method) &&
+    Object.keys(selector).every(key => ['method', 'value', 'name', 'exact', 'filter', ...extraKeys].includes(key)) &&
+    typeof selector.value === 'string' && selector.value.trim().length > 0 &&
+    selector.value.length <= (selector.method === 'locator' ? 256 : 120) &&
+    (selector.method !== 'getByRole' || /^[a-z][a-z0-9-]{0,31}$/u.test(selector.value)) &&
+    (selector.name === undefined || selector.method === 'getByRole' && typeof selector.name === 'string' &&
+      selector.name.length <= 60) && typeof selector.exact === 'boolean' &&
+    (filter === undefined || filter !== null && typeof filter === 'object' &&
+      !Array.isArray(filter) && Object.keys(filter).length > 0 &&
+      Object.keys(filter).every(key => ['hasText', 'hasNotText'].includes(key)) &&
+      (Object.values(filter) as unknown[]).every(text => typeof text === 'string' && text.length > 0 && text.length <= 120))
+}
+
 /** Executed inside the guest; frame DOM is included only when the browser itself grants same-origin access. */
 const guestDomHelpers = String.raw`
   const sidebarSelector = 'a,button,input,textarea,select,[role],[contenteditable],h1,h2,h3';
@@ -348,61 +366,57 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (element === undefined || !this.ready || this.lifetime.signal.aborted ||
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    if (!['getByRole', 'locator', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByTestId'].includes(query.method) ||
-      typeof query.value !== 'string' || query.value.trim().length < 1 ||
-      query.value.length > (query.method === 'locator' ? 256 : 120) || typeof query.exact !== 'boolean' ||
-      query.name !== undefined && (query.method !== 'getByRole' || typeof query.name !== 'string' ||
-        query.name.length > 60) || query.position !== undefined &&
+    if (!validSidebarLocateSelector(query, ['frames', 'scopes', 'position']) ||
+      query.scopes !== undefined && (!Array.isArray(query.scopes) || query.scopes.length < 1 ||
+        query.scopes.length > 2 || query.scopes.some(scope => !validSidebarLocateSelector(scope))) ||
+      query.position !== undefined &&
       (!['first', 'last', 'nth'].includes(query.position.method) || query.position.method === 'nth' &&
         (!Number.isSafeInteger(query.position.index) || query.position.index === undefined ||
           query.position.index < 0 || query.position.index > 99999)) ||
       query.frames !== undefined && (!Array.isArray(query.frames) || query.frames.length < 1 ||
         query.frames.length > 8 || query.frames.some(frame => typeof frame !== 'string' ||
-          frame.trim().length < 1 || frame.length > 256)) ||
-      query.filter !== undefined && (Object.keys(query.filter).length < 1 ||
-        Object.keys(query.filter).some(key => !['hasText', 'hasNotText'].includes(key)) ||
-        Object.values(query.filter).some(text => typeof text !== 'string' ||
-          text.length < 1 || text.length > 120))) {
+          frame.trim().length < 1 || frame.length > 256))) {
       throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
     }
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
       const query = ${JSON.stringify(query)};
+      const selectors = [...(query.scopes || []),query];
       const normalize = (value) => String(value || '').trim().replace(/\\s+/g,' ');
       const textMatches = (value,needle,exact) => exact
         ? normalize(value) === normalize(needle)
         : normalize(value).toLocaleLowerCase().includes(normalize(needle).toLocaleLowerCase());
-      const matchesBase = (node) => {
-        if (query.method === 'locator') {
-          try { return node.matches(query.value); }
+      const matchesBase = (node,selector) => {
+        if (selector.method === 'locator') {
+          try { return node.matches(selector.value); }
           catch { throw new Error('SIDEBAR_SELECTOR_INVALID'); }
         }
-        if (query.method === 'getByRole') {
+        if (selector.method === 'getByRole') {
           const described = sidebarDescribe(node);
-          return described.role === query.value &&
-            (query.name === undefined || textMatches(described.name,query.name,query.exact));
+          return described.role === selector.value &&
+            (selector.name === undefined || textMatches(described.name,selector.name,selector.exact));
         }
-        if (query.method === 'getByTestId') return node.getAttribute('data-testid') === query.value;
+        if (selector.method === 'getByTestId') return node.getAttribute('data-testid') === selector.value;
         let text = '';
-        if (query.method === 'getByText') {
+        if (selector.method === 'getByText') {
           text = node.innerText || '';
-          if (!textMatches(text,query.value,query.exact)) return false;
+          if (!textMatches(text,selector.value,selector.exact)) return false;
           return ![...node.children].some(child =>
-            textMatches(child.innerText || '',query.value,query.exact));
+            textMatches(child.innerText || '',selector.value,selector.exact));
         }
-        else if (query.method === 'getByPlaceholder') text = node.getAttribute('placeholder') || '';
-        else if (query.method === 'getByLabel') {
+        else if (selector.method === 'getByPlaceholder') text = node.getAttribute('placeholder') || '';
+        else if (selector.method === 'getByLabel') {
           const labels = node.labels ? [...node.labels].map(label => label.innerText) : [];
           const labelledBy = (node.getAttribute('aria-labelledby') || '').split(/\\s+/)
             .map(id => id && node.ownerDocument.getElementById(id)?.innerText || '');
           text = [node.getAttribute('aria-label') || '', ...labels, ...labelledBy].join(' ');
         }
-        return textMatches(text,query.value,query.exact);
+        return textMatches(text,selector.value,selector.exact);
       };
-      const matches = (node) => {
-        if (!matchesBase(node)) return false;
-        const filter = query.filter;
+      const matches = (node,selector) => {
+        if (!matchesBase(node,selector)) return false;
+        const filter = selector.filter;
         if (!filter) return true;
         const text = node.innerText || '';
         return (filter.hasText === undefined || textMatches(text,filter.hasText,false)) &&
@@ -422,8 +436,18 @@ export class ElectronWebViewImpl implements BrowserFrame {
       }
       let count = 0, first = null, last = null, nth = null;
       const nodes = sidebarAllNodes(doc);
+      const states = new WeakMap();
       for (const [index,node] of nodes.entries()) {
-        if (!matches(node)) continue;
+        const inherited = states.get(node.parentElement) || 0;
+        let state = inherited, matchedFinal = false;
+        for (let step = 0; step < selectors.length; step++) {
+          if (step > 0 && !(inherited & (1 << (step - 1)))) continue;
+          if (!matches(node,selectors[step])) continue;
+          state |= 1 << step;
+          if (step === selectors.length - 1) matchedFinal = true;
+        }
+        states.set(node,state);
+        if (!matchedFinal) continue;
         const candidate = {doc,prefix,index,node};
         if (count === 0) first = candidate;
         if (query.position?.method === 'nth' && count === query.position.index) nth = candidate;
