@@ -190,7 +190,9 @@ export function apply(ctx: Context): void {
           { op: 'selectText', ref: command.args.ref, text: command.args.text,
             ...(command.args.prefix === undefined ? {} : { prefix: command.args.prefix }),
             ...(command.args.suffix === undefined ? {} : { suffix: command.args.suffix }),
-            ...(command.args.selectionType === undefined ? {} : { selectionType: command.args.selectionType }) }, stillSelected)
+            ...(command.args.selectionType === undefined ? {} : { selectionType: command.args.selectionType }),
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'secondary') {
         if (command.args.action === undefined) throw new Error('SIDEBAR_ACTION_UNAVAILABLE')

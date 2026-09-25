@@ -1035,6 +1035,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       action.selectionType !== undefined && !['text', 'cursor_before', 'cursor_after'].includes(action.selectionType)) {
       throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
     }
+    if (action.ref.startsWith('x')) return this.nativeForeignSelectText(element, expectedUrl, action, stillSelected)
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -1087,6 +1088,26 @@ export class ElectronWebViewImpl implements BrowserFrame {
       !('title' in selected) || typeof selected.title !== 'string' ||
       !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
     return { url: expectedUrl, title: selected.title, performed: true }
+  }
+
+  private async nativeForeignSelectText(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'selectText' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || approved === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
+    const result = await this.bridge.selectForeignText(lease, expectedUrl, action.ref, approved, {
+      text: action.text,
+      ...(action.prefix === undefined ? {} : { prefix: action.prefix }),
+      ...(action.suffix === undefined ? {} : { suffix: action.suffix }),
+      ...(action.selectionType === undefined ? {} : { selectionType: action.selectionType }),
+    })
+    if (result.url !== expectedUrl || !approved.includes(result.origin) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    return { url: expectedUrl, title: result.title, performed: true }
   }
 
   private async nativeSecondary(element: WebviewElement, expectedUrl: string,

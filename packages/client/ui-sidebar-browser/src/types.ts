@@ -128,6 +128,22 @@ export interface BrowserForeignOptionSelector {
   readonly index?: number
 }
 
+/** Bounded acknowledgement for a text selection inside one approved foreign frame. */
+export interface BrowserForeignSelectionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+}
+
+/** Exact text and optional context required for one bounded foreign selection. */
+export interface BrowserForeignSelectionSpec {
+  readonly text: string
+  readonly prefix?: string
+  readonly suffix?: string
+  readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -169,6 +185,10 @@ export interface DesktopBrowserBridge {
   selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
     options: readonly BrowserForeignOptionSelector[]): Promise<BrowserForeignOptionResult>
+  /** Select one exact text match within an approved foreign element. */
+  selectForeignText(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    spec: BrowserForeignSelectionSpec): Promise<BrowserForeignSelectionResult>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
     approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>

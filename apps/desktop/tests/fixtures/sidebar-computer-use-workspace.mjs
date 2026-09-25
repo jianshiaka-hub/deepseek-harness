@@ -418,6 +418,18 @@ async function qualify() {
       'Foreign-frame press needs one-use action confirmation')
     assert.equal(await foreignFrame.executeJavaScript('document.getElementById("foreignKeyResult").textContent'),
       'trusted', 'native keyDown should reach the actual foreign input')
+    const crossSelection = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByText('foreign unique selection',{exact:true}).selectText('unique'); return 'FOREIGN_SELECTION_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-selection.json'),
+      JSON.stringify({ sessionId, tool: crossSelection }, null, 2))
+    assert.equal(crossSelection.result?.isError, false, JSON.stringify(crossSelection.result))
+    assert.equal(crossSelection.result?.value?.ok, true, JSON.stringify(crossSelection.result))
+    assert.match(crossSelection.result.value.result, /FOREIGN_SELECTION_OK/)
+    assert.equal(crossSelection.approvals.filter(approval => approval.allowed).length,
+      crossKey.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame selectText needs one-use action confirmation')
+    assert.equal(await foreignFrame.executeJavaScript('window.getSelection().toString()'),
+      'unique', 'the actual foreign document should hold the selected text')
     const rejectedFill = await control('/invoke', { sessionId,
       code: `let passwordRejected = false, lockedRejected = false, passwordKeyRejected = false; try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign secret',exact:true}).fill('blocked'); } catch (error) { passwordRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign locked',exact:true}).fill('blocked'); } catch (error) { lockedRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign secret',exact:true}).press('Enter'); } catch (error) { passwordKeyRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } if(!passwordRejected || !lockedRejected || !passwordKeyRejected) throw Error('FOREIGN_INPUT_GATE_FAILED'); return 'FOREIGN_INPUT_GATES_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-fill-denied.json'),

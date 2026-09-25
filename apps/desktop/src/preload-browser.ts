@@ -36,6 +36,9 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     selectForeignOption: (lease, expectedUrl, ref, approvedOrigins, options) => ipcRenderer.invoke(
       DESKTOP_IPC.browserSelectForeignOption, lease, expectedUrl, ref, approvedOrigins, options) as
       ReturnType<DesktopBrowserBridge['selectForeignOption']>,
+    selectForeignText: (lease, expectedUrl, ref, approvedOrigins, spec) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserSelectForeignText, lease, expectedUrl, ref, approvedOrigins, spec) as
+      ReturnType<DesktopBrowserBridge['selectForeignText']>,
     captureViewport: (lease, expectedUrl, clip, approvedOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserCaptureViewport,
       lease, expectedUrl, clip, approvedOrigins) as ReturnType<DesktopBrowserBridge['captureViewport']>,
     captureFullPage: (lease, expectedUrl, clip, approvedOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserCaptureFullPage,

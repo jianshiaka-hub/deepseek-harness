@@ -1,6 +1,6 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignOptionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignOptionResult, BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
@@ -376,6 +376,87 @@ export async function selectBrowserForeignOption(guest: FullPageCaptureGuest, ex
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, selected: raw.selected }
+}
+
+/** Select one exact text match within a visible, approved foreign element. */
+export async function selectBrowserForeignText(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], spec: unknown): Promise<BrowserForeignSelectionResult> {
+  if (!record(spec) || Object.keys(spec).some(key =>
+    !['text', 'prefix', 'suffix', 'selectionType'].includes(key)) ||
+    typeof spec.text !== 'string' || spec.text.length < 1 || spec.text.length > 4000 ||
+    spec.prefix !== undefined && (typeof spec.prefix !== 'string' || spec.prefix.length > 4000) ||
+    spec.suffix !== undefined && (typeof spec.suffix !== 'string' || spec.suffix.length > 4000) ||
+    spec.selectionType !== undefined && !['text', 'cursor_before', 'cursor_after'].includes(spec.selectionType as string)) {
+    throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
+  }
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x\d{1,10}-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const id = Number(/^x(\d{1,10})-/iu.exec(input as string)?.[1])
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === id)
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) throw new Error('SIDEBAR_STALE_REF')
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const action = ${JSON.stringify(spec)};
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[1])});
+    if (frames.length !== 0 || !node.isConnected) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+    const input = ['INPUT','TEXTAREA'].includes(node.tagName);
+    if (input && (node.disabled || node.tagName === 'INPUT' &&
+      !['text','search','url','tel'].includes(node.type))) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+    const source = input ? node.value : node.textContent ?? '';
+    if (source.length > 200000) throw new Error('SIDEBAR_SELECTION_TOO_LARGE');
+    const matches = [];
+    for (let index = source.indexOf(action.text); index >= 0; index = source.indexOf(action.text, index + 1)) {
+      if (action.prefix !== undefined && !source.slice(0,index).endsWith(action.prefix)) continue;
+      if (action.suffix !== undefined && !source.slice(index + action.text.length).startsWith(action.suffix)) continue;
+      matches.push(index);
+      if (matches.length > 1) throw new Error('SIDEBAR_AMBIGUOUS_SELECTION');
+    }
+    if (matches.length === 0) throw new Error('SIDEBAR_TEXT_NOT_FOUND');
+    let start = matches[0], end = start + action.text.length;
+    if (action.selectionType === 'cursor_before') end = start;
+    if (action.selectionType === 'cursor_after') start = end;
+    if (input) {
+      node.focus();
+      if (document.activeElement !== node) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      node.setSelectionRange(start,end);
+      if (node.selectionStart !== start || node.selectionEnd !== end) {
+        throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      }
+    } else {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const nodes = []; let offset = 0;
+      while (walker.nextNode()) {
+        const item = walker.currentNode;
+        nodes.push({item,start:offset,end:offset + item.textContent.length});
+        offset += item.textContent.length;
+      }
+      const first = nodes.find(item => start >= item.start && start <= item.end);
+      const last = nodes.find(item => end >= item.start && end <= item.end);
+      if (!first || !last) throw new Error('SIDEBAR_TEXT_NOT_FOUND');
+      const range = document.createRange();
+      range.setStart(first.item,start - first.start);
+      range.setEnd(last.item,end - last.start);
+      const selection = document.getSelection();
+      if (!selection) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      selection.removeAllRanges(); selection.addRange(range);
+      if (selection.rangeCount !== 1 || selection.toString() !==
+        (action.selectionType === 'text' || action.selectionType === undefined ? action.text : '')) {
+        throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      }
+    }
+    if (!node.isConnected || location.href !== ${JSON.stringify(leaf.url)}) {
+      throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+    }
+    return {confirmed:true};
+  })()`)
+  if (!record(raw) || raw.confirmed !== true ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512),
+    origin: point.origin, fingerprint: point.fingerprint }
 }
 
 /** Fixed, bounded child-frame inspection. Form values and element handles stay inside the page. */

@@ -80,6 +80,7 @@ export type BrowserDomAction =
     readonly prefix?: string
     readonly suffix?: string
     readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
+    readonly approvedFrameOrigins?: readonly string[]
   }
   | {
     readonly op: 'secondary'
