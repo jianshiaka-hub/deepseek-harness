@@ -358,7 +358,11 @@ export class ElectronWebViewImpl implements BrowserFrame {
           query.position.index < 0 || query.position.index > 99999)) ||
       query.frames !== undefined && (!Array.isArray(query.frames) || query.frames.length < 1 ||
         query.frames.length > 8 || query.frames.some(frame => typeof frame !== 'string' ||
-          frame.trim().length < 1 || frame.length > 256))) {
+          frame.trim().length < 1 || frame.length > 256)) ||
+      query.filter !== undefined && (Object.keys(query.filter).length < 1 ||
+        Object.keys(query.filter).some(key => !['hasText', 'hasNotText'].includes(key)) ||
+        Object.values(query.filter).some(text => typeof text !== 'string' ||
+          text.length < 1 || text.length > 120))) {
       throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
     }
     const code = `(() => {
@@ -369,7 +373,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       const textMatches = (value,needle,exact) => exact
         ? normalize(value) === normalize(needle)
         : normalize(value).toLocaleLowerCase().includes(normalize(needle).toLocaleLowerCase());
-      const matches = (node) => {
+      const matchesBase = (node) => {
         if (query.method === 'locator') {
           try { return node.matches(query.value); }
           catch { throw new Error('SIDEBAR_SELECTOR_INVALID'); }
@@ -395,6 +399,14 @@ export class ElectronWebViewImpl implements BrowserFrame {
           text = [node.getAttribute('aria-label') || '', ...labels, ...labelledBy].join(' ');
         }
         return textMatches(text,query.value,query.exact);
+      };
+      const matches = (node) => {
+        if (!matchesBase(node)) return false;
+        const filter = query.filter;
+        if (!filter) return true;
+        const text = node.innerText || '';
+        return (filter.hasText === undefined || textMatches(text,filter.hasText,false)) &&
+          (filter.hasNotText === undefined || !textMatches(text,filter.hasNotText,false));
       };
       let doc = document, prefix = '';
       for (const selector of query.frames || []) {

@@ -99,7 +99,7 @@ Browser 包不增加 prompt 内容。Computer Use 返回的获准观察以普通
 
 ## 已知限制与延期工作
 
-当前源码的 0.1.7-rc.1 Desktop 与 Host 已通过私有端到端测试：Computer Use 从一个真实选中的侧栏 webview 读取文字和可访问性信息，以 CSS、角色、文本、标签、占位符和测试 ID 查询，随后点击普通 div、点击同源 frame 内元素并按标签填写；四次操作各经一次性确认。侧栏支持 getByRole、locator(CSS)、getByText、getByLabel、getByPlaceholder、getByTestId 和显式同源 frameLocator(CSS)，以及计数、首/末/指定位置、点击、双击、填入、按键和输入。每次查询最多扫描顶层或选中 frame 的 10 万个元素，只返回匹配总数和至多一个经指纹复核的引用。链式过滤、正则、任意 DOM 读取、跨源 frame 和完整 Playwright 语义仍不可用。用户正式安装的 0.1.7-rc.2 应用尚未包含这些本地侧栏桥接改动；移植到 rc.2 和已安装应用验收仍待完成。
+独立的 0.1.7-rc.2 Desktop 与 Host 源码已通过私有端到端测试：Computer Use 从一个真实选中的侧栏 webview 读取文字和可访问性信息，以 CSS、角色、文本、标签、占位符和测试 ID 查询，随后点击普通 div、点击同源 frame 内元素并按标签填写；四次操作各经一次性确认。侧栏支持 getByRole、locator(CSS)、getByText、getByLabel、getByPlaceholder、getByTestId 和显式同源 frameLocator(CSS)，以及计数、首/末/指定位置、点击、双击、填入、按键和输入。选择器后可接一个包含 `hasText` 和/或 `hasNotText` 的文本过滤。每次查询最多扫描顶层或选中 frame 的 10 万个元素，只返回匹配总数和至多一个经指纹复核的引用。其他链式过滤、正则、任意 DOM 读取、跨源 frame 和完整 Playwright 语义仍不可用。用户正式安装的 0.1.7-rc.2 应用尚未包含这些本地侧栏桥接改动；已安装应用验收仍待完成。
 
 当前选中标签的 `drag(from,to)` 需要先获逐站许可，再逐次确认。Client 检查视口路径，并向同一个 webview 发送有界的原生鼠标序列。Desktop 只截取该 guest 发起的拖放数据，再向同一个 guest 发送固定的 Chromium 进入、经过和投放命令；导航、切换标签或命令失败会取消短期租约。`dropDispatched` 区分 Chromium 已发送 HTML 投放与仅完成指针拖动，不表示网页已接受投放。隔离 Electron 夹具在这条路径上收到可信的 `dragstart` 和 `drop` 事件。已安装 Desktop 会话尚未完成端到端验收。
 

@@ -104,6 +104,7 @@ export interface BrowserLocateQuery {
   readonly name?: string
   readonly exact: boolean
   readonly frames?: readonly string[]
+  readonly filter?: { readonly hasText?: string; readonly hasNotText?: string }
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
 }
 
