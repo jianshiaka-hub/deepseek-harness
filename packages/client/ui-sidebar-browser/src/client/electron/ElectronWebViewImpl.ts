@@ -1112,6 +1112,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativeSecondary(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'secondary' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.ref.startsWith('x')) return this.nativeForeignSecondary(element, expectedUrl, action, stillSelected)
     if (action.action === 'showmenu') return this.nativeClick(element, expectedUrl,
       { op: 'click', ref: action.ref, button: 'right', exposedRoleOnly: true }, stillSelected)
     if (action.action === 'increment' || action.action === 'decrement') return this.nativeKey(element, expectedUrl,
@@ -1147,6 +1148,44 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (state.expanded === wanted) return { url: expectedUrl, title: state.title, performed: true }
     return this.nativeClick(element, expectedUrl,
       { op: 'click', ref: action.ref, expectedExpanded: wanted === 'true' ? 'false' : 'true' }, stillSelected)
+  }
+
+  private async nativeForeignSecondary(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'secondary' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    if (lease === undefined || approved === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const state = await this.bridge.foreignSecondaryState(lease, expectedUrl, action.ref, approved, action.action)
+    if (state.url !== expectedUrl || !approved.includes(state.origin) || this.lease !== lease ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
+    if (action.action === 'focus') return { url: expectedUrl, title: state.title, performed: true }
+    if (action.action === 'showmenu') return this.nativeClick(element, expectedUrl,
+      { op: 'click', ref: action.ref, button: 'right', exposedRoleOnly: true,
+        approvedFrameOrigins: approved }, stillSelected)
+    if (action.action === 'expand' || action.action === 'collapse') {
+      const wanted = action.action === 'expand' ? 'true' : 'false'
+      if (state.expanded === wanted) return { url: expectedUrl, title: state.title, performed: true }
+      if (state.expanded !== (wanted === 'true' ? 'false' : 'true')) throw new Error('SIDEBAR_ACTION_NOT_EXPOSED')
+      return this.nativeClick(element, expectedUrl,
+        { op: 'click', ref: action.ref, expectedExpanded: state.expanded,
+          approvedFrameOrigins: approved }, stillSelected)
+    }
+    const keyboard = sidebarKeyEvent(action.action === 'increment' ? 'ArrowUp' : 'ArrowDown')
+    const checked = await this.bridge.foreignSecondaryState(lease, expectedUrl, action.ref, approved, action.action)
+    if (checked.fingerprint !== state.fingerprint || checked.origin !== state.origin || this.lease !== lease ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
+    let down = false
+    try {
+      await element.sendInputEvent({ type: 'keyDown', ...keyboard })
+      down = true
+    } finally {
+      if (down) await element.sendInputEvent({ type: 'keyUp', ...keyboard }).catch(() => {})
+    }
+    if (this.lease !== lease || !this.inputStillSelected(element, expectedUrl, stillSelected)) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    return { url: expectedUrl, title: state.title, performed: true }
   }
 
   private async nativeScroll(element: WebviewElement, expectedUrl: string,
@@ -1410,6 +1449,16 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== point.fingerprint ||
       !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
       throw new Error('SIDEBAR_NAVIGATED')
+    }
+    if (action.exposedRoleOnly || action.expectedExpanded !== undefined) {
+      const secondary = action.exposedRoleOnly ? 'showmenu'
+        : action.expectedExpanded === 'false' ? 'expand' : 'collapse'
+      const state = await this.bridge.foreignSecondaryState(lease, expectedUrl, ref, approved, secondary)
+      if (state.fingerprint !== point.fingerprint || state.origin !== point.origin ||
+        action.expectedExpanded !== undefined && state.expanded !== action.expectedExpanded ||
+        this.lease !== lease || !this.inputStillSelected(element, expectedUrl, stillSelected)) {
+        throw new Error('SIDEBAR_TARGET_MOVED')
+      }
     }
     let pressed = false
     try {

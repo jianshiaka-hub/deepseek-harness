@@ -1,6 +1,6 @@
 /** Bounded full-page PNG capture of one main-owned Sidebar guest. */
 import { createHash } from 'node:crypto'
-import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignOptionResult, BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserPageScreenshot, BrowserScreenshotClip, BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint, BrowserForeignInputState, BrowserForeignSecondaryState, BrowserForeignOptionResult, BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from '@deepseek-ai/dsh-client-ui-sidebar-browser/src/locator-script.ts'
 
 interface CaptureFrame {
@@ -312,6 +312,53 @@ export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, e
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, hadText: raw.hadText }
+}
+
+/** Inspect or focus one fixed secondary target in an approved foreign frame. */
+export async function stateForBrowserForeignSecondary(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], action: unknown): Promise<BrowserForeignSecondaryState> {
+  if (!['focus', 'showmenu', 'expand', 'collapse', 'increment', 'decrement'].includes(action as string)) {
+    throw new Error('SIDEBAR_ACTION_UNAVAILABLE')
+  }
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x(\d{1,10})-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === Number(match[1]))
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) throw new Error('SIDEBAR_STALE_REF')
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
+    if (frames.length !== 0 || !node.isConnected || node.matches('iframe,frame') ||
+      ('disabled' in node && node.disabled)) throw new Error('SIDEBAR_ACTION_NOT_EXPOSED');
+    const action = ${JSON.stringify(action)};
+    const role = sidebarDescribe(node).role;
+    if (action === 'focus' || action === 'showmenu') {
+      if (!['button','textbox','link','combobox','checkbox','radio','slider','spinbutton'].includes(role)) {
+        throw new Error('SIDEBAR_ACTION_NOT_EXPOSED');
+      }
+    } else if (action === 'increment' || action === 'decrement') {
+      if (!['slider','spinbutton'].includes(role) || ('readOnly' in node && node.readOnly)) {
+        throw new Error('SIDEBAR_ACTION_NOT_EXPOSED');
+      }
+    }
+    if (action === 'focus' || action === 'increment' || action === 'decrement') {
+      node.focus();
+      if (document.activeElement !== node) throw new Error('SIDEBAR_ACTION_NOT_EXPOSED');
+    }
+    const expanded = node.getAttribute('aria-expanded');
+    if (action === 'expand' || action === 'collapse') {
+      if (!['true','false'].includes(expanded)) throw new Error('SIDEBAR_ACTION_NOT_EXPOSED');
+    }
+    return {expanded:action === 'expand' || action === 'collapse' ? expanded : null};
+  })()`)
+  if (!record(raw) || raw.expanded !== null && raw.expanded !== 'true' && raw.expanded !== 'false' ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint,
+    ...(raw.expanded === null ? {} : { expanded: raw.expanded }) }
 }
 
 /** Change one approved foreign select using bounded exact option matchers. */

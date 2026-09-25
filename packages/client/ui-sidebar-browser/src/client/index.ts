@@ -197,7 +197,9 @@ export function apply(ctx: Context): void {
       if (command.op === 'secondary') {
         if (command.args.action === undefined) throw new Error('SIDEBAR_ACTION_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,
-          { op: 'secondary', ref: command.args.ref, action: command.args.action }, stillSelected)
+          { op: 'secondary', ref: command.args.ref, action: command.args.action,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.args.dx === undefined || command.args.dy === undefined) throw new Error('SIDEBAR_SCROLL_UNAVAILABLE')
       return controller.action(tabId, command.expectedUrl,

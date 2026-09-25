@@ -112,6 +112,15 @@ export interface BrowserForeignInputState {
   readonly hadText: boolean
 }
 
+/** Bounded state for one fixed secondary action in an approved foreign frame. */
+export interface BrowserForeignSecondaryState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly expanded?: 'true' | 'false'
+}
+
 /** Bounded result of selecting options in one approved foreign select element. */
 export interface BrowserForeignOptionResult {
   readonly url: string
@@ -181,6 +190,10 @@ export interface DesktopBrowserBridge {
     ref: string, approvedOrigins: readonly string[],
     phase: 'select' | 'verify' | 'focus' | 'check' | 'keyFocus' | 'keyCheck',
     value?: string): Promise<BrowserForeignInputState>
+  /** Validate the target and prepare one fixed secondary action without exporting page data. */
+  foreignSecondaryState(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'): Promise<BrowserForeignSecondaryState>
   /** Select unique enabled options in one approved foreign select element. */
   selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],

@@ -86,6 +86,7 @@ export type BrowserDomAction =
     readonly op: 'secondary'
     readonly ref: string
     readonly action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'
+    readonly approvedFrameOrigins?: readonly string[]
   }
   | {
     readonly op: 'key'

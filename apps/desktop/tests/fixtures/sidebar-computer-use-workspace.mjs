@@ -470,6 +470,40 @@ async function qualify() {
     assert.equal(crossShot.result?.isError, false, JSON.stringify(crossShot.result))
     assert.equal(crossShot.result?.value?.ok, true, JSON.stringify(crossShot.result))
     assert.match(crossShot.result.value.result, /CROSS_PNG_[1-9][0-9]*_[1-9][0-9]*/)
+    await foreignFrame.executeJavaScript(`(() => {
+      document.querySelector('button').addEventListener('contextmenu', event => {
+        event.preventDefault(); document.body.dataset.foreignMenuTrusted = String(event.isTrusted);
+      });
+      const toggle = document.createElement('button');
+      toggle.textContent = 'Foreign toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.addEventListener('click', event => {
+        toggle.setAttribute('aria-expanded', toggle.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+        document.body.dataset.foreignToggleTrusted = String(event.isTrusted);
+      });
+      const number = document.createElement('input');
+      number.type = 'number'; number.value = '2'; number.setAttribute('aria-label', 'Foreign count');
+      number.addEventListener('input', event => {
+        document.body.dataset.foreignNumberTrusted = String(event.isTrusted);
+      });
+      document.body.prepend(toggle, number);
+    })()`)
+    const crossSecondary = await control('/invoke', { sessionId,
+      code: `{ const target = t.playwright.frameLocator('#foreign'); await target.getByRole('textbox',{name:'Foreign name',exact:true}).performSecondaryAction('focus'); await target.getByRole('button',{name:'Cross-origin frame',exact:true}).performSecondaryAction('showmenu'); await target.getByRole('button',{name:'Foreign toggle',exact:true}).performSecondaryAction('expand'); await target.getByRole('button',{name:'Foreign toggle',exact:true}).performSecondaryAction('collapse'); await target.getByRole('spinbutton',{name:'Foreign count',exact:true}).performSecondaryAction('increment'); await target.getByRole('spinbutton',{name:'Foreign count',exact:true}).performSecondaryAction('decrement'); } return 'FOREIGN_SECONDARY_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-secondary.json'),
+      JSON.stringify({ sessionId, tool: crossSecondary }, null, 2))
+    assert.equal(crossSecondary.result?.isError, false, JSON.stringify(crossSecondary.result))
+    assert.equal(crossSecondary.result?.value?.ok, true, JSON.stringify(crossSecondary.result))
+    assert.match(crossSecondary.result.value.result, /FOREIGN_SECONDARY_OK/)
+    assert.equal(crossSecondary.approvals.filter(approval => approval.allowed).length,
+      crossShot.approvals.filter(approval => approval.allowed).length + 6,
+      'each foreign secondary action needs one-use confirmation')
+    assert.deepEqual(await foreignFrame.executeJavaScript(`({menu:document.body.dataset.foreignMenuTrusted,
+      toggle:document.body.dataset.foreignToggleTrusted,
+      expanded:document.querySelector('[aria-label="Foreign count"]').previousSibling.getAttribute('aria-expanded'),
+      number:document.querySelector('[aria-label="Foreign count"]').value,
+      numberTrusted:document.body.dataset.foreignNumberTrusted})`),
+    {menu:'true',toggle:'true',expanded:'false',number:'2',numberTrusted:'true'})
     await foreignFrame.executeJavaScript(`document.body.insertAdjacentHTML('beforeend',
       '<div style="height:1400px">Foreign scroll tail</div>')`)
     const foreignScrollBefore = await foreignFrame.executeJavaScript('window.scrollY')
@@ -480,7 +514,7 @@ async function qualify() {
     assert.equal(crossScroll.result?.value?.ok, true, JSON.stringify(crossScroll.result))
     assert.match(crossScroll.result.value.result, /FOREIGN_SCROLL_OK/)
     assert.equal(crossScroll.approvals.filter(approval => approval.allowed).length,
-      crossShot.approvals.filter(approval => approval.allowed).length,
+      crossSecondary.approvals.filter(approval => approval.allowed).length,
       'Foreign-frame scroll uses approved site access without click or text confirmation')
     await waitFor(() => foreignFrame.executeJavaScript(`window.scrollY > ${foreignScrollBefore}`),
       'trusted foreign-frame wheel scroll', 5000)

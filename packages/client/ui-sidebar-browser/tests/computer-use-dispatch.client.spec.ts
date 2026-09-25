@@ -112,6 +112,8 @@ it('reports only the active Browser tab and routes approved observations and nav
     .toMatchObject({ origins: ['https://example.test'] })
   const query = { method: 'getByRole' as const, value: 'button', exact: true }
   await h.execute(current!, command('locate', { query }), () => true)
+  await h.execute(current!, command('secondary', { ref: 'x42-ref', action: 'focus',
+    approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }), () => true)
   await h.execute(current!, command('screenshot', { fullPage: true,
     approvedFrameOrigins: ['https://example.test'] }), () => true)
   await h.execute(current!, command('dialog'), () => true)
@@ -119,7 +121,10 @@ it('reports only the active Browser tab and routes approved observations and nav
   await h.execute(current!, command('goto', { url: 'https://next.test/' }), () => true)
   await h.execute(current!, command('back'), () => true)
   await h.execute(current!, command('forward'), () => true)
-  expect(h.face.locate).toHaveBeenCalledWith(tabId, url, query)
+  expect(h.face.locate).toHaveBeenCalledWith(tabId, url, query, undefined)
+  expect(h.face.action).toHaveBeenCalledWith(tabId, url,
+    { op: 'secondary', ref: 'x42-ref', action: 'focus',
+      approvedFrameOrigins: ['https://example.test', 'https://embedded.test'] }, expect.any(Function))
   expect(h.face.frameOrigins).toHaveBeenCalledWith(tabId, url)
   expect(h.face.screenshot).toHaveBeenCalledWith(tabId, url, undefined, true,
     ['https://example.test'])
