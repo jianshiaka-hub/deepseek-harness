@@ -103,7 +103,12 @@ export interface BrowserLocateSelector {
   readonly value: string
   readonly name?: string
   readonly exact: boolean
-  readonly filter?: { readonly hasText?: string; readonly hasNotText?: string }
+  readonly filter?: {
+    readonly hasText?: string
+    readonly hasNotText?: string
+    readonly has?: Omit<BrowserLocateSelector, 'filter'>
+    readonly hasNot?: Omit<BrowserLocateSelector, 'filter'>
+  }
 }
 
 export interface BrowserLocateQuery extends BrowserLocateSelector {

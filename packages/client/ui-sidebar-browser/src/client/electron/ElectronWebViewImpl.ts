@@ -53,8 +53,11 @@ function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[]
       selector.name.length <= 60) && typeof selector.exact === 'boolean' &&
     (filter === undefined || filter !== null && typeof filter === 'object' &&
       !Array.isArray(filter) && Object.keys(filter).length > 0 &&
-      Object.keys(filter).every(key => ['hasText', 'hasNotText'].includes(key)) &&
-      (Object.values(filter) as unknown[]).every(text => typeof text === 'string' && text.length > 0 && text.length <= 120))
+      Object.entries(filter).every(([key, nested]) =>
+        ['hasText', 'hasNotText'].includes(key)
+          ? typeof nested === 'string' && nested.length > 0 && nested.length <= 120
+          : ['has', 'hasNot'].includes(key) && nested !== null && typeof nested === 'object' &&
+            !('filter' in nested) && validSidebarLocateSelector(nested)))
 }
 
 /** Executed inside the guest; frame DOM is included only when the browser itself grants same-origin access. */
@@ -415,13 +418,15 @@ export class ElectronWebViewImpl implements BrowserFrame {
         }
         return textMatches(text,selector.value,selector.exact);
       };
-      const matches = (node,selector) => {
+      const matches = (node,selector,step) => {
         if (!matchesBase(node,selector)) return false;
         const filter = selector.filter;
         if (!filter) return true;
         const text = node.innerText || '';
         return (filter.hasText === undefined || textMatches(text,filter.hasText,false)) &&
-          (filter.hasNotText === undefined || !textMatches(text,filter.hasNotText,false));
+          (filter.hasNotText === undefined || !textMatches(text,filter.hasNotText,false)) &&
+          (nestedResults[step].has === null || nestedResults[step].has.has(node)) &&
+          (nestedResults[step].hasNot === null || !nestedResults[step].hasNot.has(node));
       };
       let doc = document, prefix = '';
       const frameNodes = [];
@@ -439,13 +444,28 @@ export class ElectronWebViewImpl implements BrowserFrame {
       }
       let count = 0, first = null, last = null, nth = null;
       const nodes = sidebarAllNodes(doc);
+      const nestedDescendants = nested => {
+        if (nested === undefined) return null;
+        const containing = new WeakSet();
+        for (let index = nodes.length - 1; index >= 0; index--) {
+          const node = nodes[index];
+          if ((matchesBase(node,nested) || containing.has(node)) && node.parentElement) {
+            containing.add(node.parentElement);
+          }
+        }
+        return containing;
+      };
+      const nestedResults = selectors.map(selector => ({
+        has:nestedDescendants(selector.filter?.has),
+        hasNot:nestedDescendants(selector.filter?.hasNot),
+      }));
       const states = new WeakMap();
       for (const [index,node] of nodes.entries()) {
         const inherited = states.get(node.parentElement) || 0;
         let state = inherited, matchedFinal = false;
         for (let step = 0; step < selectors.length; step++) {
           if (step > 0 && !(inherited & (1 << (step - 1)))) continue;
-          if (!matches(node,selectors[step])) continue;
+          if (!matches(node,selectors[step],step)) continue;
           state |= 1 << step;
           if (step === selectors.length - 1) matchedFinal = true;
         }

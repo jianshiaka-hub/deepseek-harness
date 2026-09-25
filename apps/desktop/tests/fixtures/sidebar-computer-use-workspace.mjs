@@ -129,6 +129,13 @@ async function qualify() {
     assert.match(located.result.value.result, /LOCATORS_1_1_1_1_1_1_0_1_1_0_1_1_0_false_true_false_true_false/)
     assert.equal(located.approvals.filter(approval => approval.allowed).length, 0,
       'Read-only locator queries must not consume action approval')
+    const relative = await control('/invoke', { sessionId,
+      code: `let section = t.playwright.getByTestId('group-a'); let inner = t.playwright.getByTestId('duplicate'); return 'RELATIVE_' + [await section.filter({has:inner}).count(),await section.filter({hasNot:inner}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-relative-locate.json'), JSON.stringify({ sessionId, tool: relative }, null, 2))
+    assert.equal(relative.result?.isError, false, JSON.stringify(relative.result))
+    assert.equal(relative.result?.value?.ok, true, JSON.stringify(relative.result))
+    assert.match(relative.result.value.result, /RELATIVE_1_0/)
+    assert.equal(relative.approvals.filter(approval => approval.allowed).length, 0)
     const generic = await control('/invoke', { sessionId,
       code: `await t.playwright.locator('#generic').click(); return 'generic clicked';` })
     await writeFile(join(root, 'computer-use-generic-click.json'), JSON.stringify({ sessionId, tool: generic }, null, 2))
