@@ -261,13 +261,13 @@ export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, exp
     fingerprint: before, origin: leaf.origin }
 }
 
-/** Prepare or verify one visible, approved foreign text field without exporting its value. */
+/** Prepare or verify one visible, approved foreign editable target without exporting its value. */
 export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, expectedUrl: string,
   input: unknown, approvedOrigins: readonly string[], phase: unknown,
   value: unknown): Promise<BrowserForeignInputState> {
-  if (phase !== 'select' && phase !== 'verify' ||
+  if (!['select', 'verify', 'focus', 'check'].includes(phase as string) ||
     (phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) ||
-    (phase === 'select' && value !== undefined)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+    (phase !== 'verify' && value !== undefined)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
   const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
   const match = /^x\d{1,10}-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
   if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
@@ -278,18 +278,28 @@ export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, e
     if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
     ${guestDomHelpers}
     const {node,frames} = sidebarResolveRef(${JSON.stringify(match[1])});
-    if (frames.length !== 0 || !['INPUT','TEXTAREA'].includes(node.tagName) ||
-      node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type) ||
-      node.disabled || node.readOnly) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    if (frames.length !== 0 || !node.isConnected ||
+      ('disabled' in node && node.disabled) || ('readOnly' in node && node.readOnly) ||
+      (['select','verify'].includes(${JSON.stringify(phase)})
+        ? !['INPUT','TEXTAREA'].includes(node.tagName) ||
+          node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type)
+        : node.tagName === 'INPUT' && !['text','search','email','url','tel','number'].includes(node.type) ||
+          !['INPUT','TEXTAREA'].includes(node.tagName) && !node.isContentEditable)) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }
     ${phase === 'select' ? `node.focus();
     if (document.activeElement !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     node.select();
     if (node.selectionStart !== 0 || node.selectionEnd !== node.value.length) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }` : phase === 'focus' ? `node.focus();
+    if (document.activeElement !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');`
+      : phase === 'check' ? `if (document.activeElement !== node) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     }` : `if (document.activeElement !== node || node.value !== ${JSON.stringify(value)}) {
       throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED');
     }`}
-    return {hadText:node.value.length > 0};
+    return {hadText:(typeof node.value === 'string' ? node.value : node.textContent || '').length > 0};
   })()`)
   if (!record(raw) || typeof raw.hadText !== 'boolean' ||
     auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {

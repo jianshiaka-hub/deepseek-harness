@@ -368,6 +368,30 @@ async function qualify() {
       'Foreign-frame clear needs one-use action confirmation')
     assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
       '', 'native Backspace should clear the actual foreign document')
+    const crossType = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).type('A'); return 'FOREIGN_TYPE_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-type.json'),
+      JSON.stringify({ sessionId, tool: crossType }, null, 2))
+    assert.equal(crossType.result?.isError, false, JSON.stringify(crossType.result))
+    assert.equal(crossType.result?.value?.ok, true, JSON.stringify(crossType.result))
+    assert.match(crossType.result.value.result, /FOREIGN_TYPE_OK/)
+    assert.equal(crossType.approvals.filter(approval => approval.allowed).length,
+      crossClear.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame type needs one-use action confirmation')
+    assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
+      'A', 'native insertText should append in the actual foreign document')
+    const crossSequential = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).pressSequentially('你😀'); return 'FOREIGN_SEQUENTIAL_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-sequential.json'),
+      JSON.stringify({ sessionId, tool: crossSequential }, null, 2))
+    assert.equal(crossSequential.result?.isError, false, JSON.stringify(crossSequential.result))
+    assert.equal(crossSequential.result?.value?.ok, true, JSON.stringify(crossSequential.result))
+    assert.match(crossSequential.result.value.result, /FOREIGN_SEQUENTIAL_OK/)
+    assert.equal(crossSequential.approvals.filter(approval => approval.allowed).length,
+      crossType.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame sequential typing needs one-use action confirmation')
+    assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
+      'A你😀', 'trusted character events should update the actual foreign document')
     const rejectedFill = await control('/invoke', { sessionId,
       code: `let passwordRejected = false, lockedRejected = false; try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign secret',exact:true}).fill('blocked'); } catch (error) { passwordRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } try { await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign locked',exact:true}).fill('blocked'); } catch (error) { lockedRejected = String(error).includes('SIDEBAR_INPUT_UNAVAILABLE'); } if(!passwordRejected || !lockedRejected) throw Error('FOREIGN_INPUT_GATE_FAILED'); return 'FOREIGN_INPUT_GATES_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-fill-denied.json'),

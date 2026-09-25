@@ -42,7 +42,13 @@ export type BrowserDomAction =
     /** Require the same interactive role that was exposed by inspection. */
     readonly exposedRoleOnly?: boolean
   }
-  | { readonly op: 'type'; readonly ref?: string; readonly text: string; readonly sequential?: true }
+  | {
+    readonly op: 'type'
+    readonly ref?: string
+    readonly text: string
+    readonly sequential?: true
+    readonly approvedFrameOrigins?: readonly string[]
+  }
   | {
     readonly op: 'paste'
     readonly ref?: string

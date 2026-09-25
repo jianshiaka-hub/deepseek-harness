@@ -144,9 +144,9 @@ export interface DesktopBrowserBridge {
   /** Revalidate one foreign element ref and resolve its visible point in the top guest viewport. */
   foreignRefPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
-  /** Select or verify only the approved foreign text field named by a fresh ref. */
+  /** Select/verify a foreign text field, or focus/check a foreign editable target. */
   foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
-    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify',
+    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify' | 'focus' | 'check',
     value?: string): Promise<BrowserForeignInputState>
   /** Capture the current viewport with native frame-event and site checks. */
   captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,

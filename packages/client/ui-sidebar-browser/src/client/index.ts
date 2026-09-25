@@ -163,6 +163,8 @@ export function apply(ctx: Context): void {
         return controller.action(tabId, command.expectedUrl,
           { op: 'type', ...(command.args.ref === undefined ? {} : { ref: command.args.ref }),
             text: command.args.text,
+            ...(command.args.approvedFrameOrigins === undefined ? {} :
+              { approvedFrameOrigins: command.args.approvedFrameOrigins }),
             ...(command.args.sequential === true ? { sequential: true as const } : {}) }, stillSelected)
       }
       if (command.args.ref === undefined) throw new Error('SIDEBAR_UNKNOWN_REF')

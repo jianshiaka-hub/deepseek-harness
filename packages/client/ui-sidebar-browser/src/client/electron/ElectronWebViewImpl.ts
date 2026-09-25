@@ -614,6 +614,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
         Array.from(action.text).some(char => /[\p{Cc}\p{Cs}]/u.test(char)))) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
     }
+    if (action.ref?.startsWith('x')) return this.nativeForeignType(element, expectedUrl, action, stillSelected)
     const receipt = `__dsh_cu_type_${randomUUID().replaceAll('-', '')}`
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
@@ -692,6 +693,54 @@ export class ElectronWebViewImpl implements BrowserFrame {
     } finally {
       await element.executeJavaScript(`(() => { delete window[${JSON.stringify(receipt)}]; })()`).catch(() => {})
     }
+  }
+
+  private async nativeForeignType(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'type' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    const ref = action.ref
+    if (lease === undefined || approved === undefined || ref === undefined ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+    const focused = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'focus')
+    if (focused.url !== expectedUrl || !approved.includes(focused.origin) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    const verify = async (): Promise<void> => {
+      const state = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'check')
+      if (state.fingerprint !== focused.fingerprint || state.origin !== focused.origin ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+        throw new Error('SIDEBAR_SELECTION_CHANGED')
+      }
+      if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== focused.fingerprint ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+    }
+    await verify()
+    if (action.sequential === true) {
+      for (const char of action.text) {
+        await verify()
+        const modifiers: SidebarKeyModifier[] = /[A-Z~!@#$%^&*()_+{}|:"<>?]/u.test(char) ? ['shift'] : []
+        const keyboard = { keyCode: char, modifiers }
+        let down = false
+        try {
+          await element.sendInputEvent({ type: 'keyDown', ...keyboard })
+          down = true
+          await verify()
+          await element.sendInputEvent({ type: 'char', ...keyboard })
+        } finally {
+          if (down) await element.sendInputEvent({ type: 'keyUp', ...keyboard }).catch(() => {})
+        }
+        await verify()
+      }
+    } else {
+      await element.insertText(action.text)
+      await verify()
+    }
+    return { url: expectedUrl, title: focused.title, performed: true }
   }
 
   private async nativePaste(element: WebviewElement, expectedUrl: string,
