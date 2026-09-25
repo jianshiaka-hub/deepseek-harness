@@ -160,9 +160,10 @@ export interface DesktopBrowserBridge {
   /** Revalidate one foreign element ref and resolve its visible point in the top guest viewport. */
   foreignRefPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
-  /** Select/verify a foreign text field, or focus/check a foreign editable target. */
+  /** Select/verify a foreign text field, or focus/check an editable or key target. */
   foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
-    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify' | 'focus' | 'check',
+    ref: string, approvedOrigins: readonly string[],
+    phase: 'select' | 'verify' | 'focus' | 'check' | 'keyFocus' | 'keyCheck',
     value?: string): Promise<BrowserForeignInputState>
   /** Select unique enabled options in one approved foreign select element. */
   selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,

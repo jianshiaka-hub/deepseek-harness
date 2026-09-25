@@ -148,7 +148,9 @@ export function apply(ctx: Context): void {
         if (command.args.key === undefined) throw new Error('SIDEBAR_KEY_UNAVAILABLE')
         return controller.action(tabId, command.expectedUrl,
           { op: 'key', ...(command.args.ref === undefined ? {} : { ref: command.args.ref }),
-            key: command.args.key }, stillSelected)
+            key: command.args.key,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'paste') {
         if (command.args.text === undefined || command.args.format === undefined) {

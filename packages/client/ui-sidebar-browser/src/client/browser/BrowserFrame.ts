@@ -86,7 +86,13 @@ export type BrowserDomAction =
     readonly ref: string
     readonly action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'
   }
-  | { readonly op: 'key'; readonly ref?: string; readonly key: string; readonly numericOnly?: boolean }
+  | {
+    readonly op: 'key'
+    readonly ref?: string
+    readonly key: string
+    readonly numericOnly?: boolean
+    readonly approvedFrameOrigins?: readonly string[]
+  }
   | { readonly op: 'scroll'; readonly ref: string; readonly dx: number; readonly dy: number }
   /** Agent navigation runs in the current page so Chromium can emit beforeunload. */
   | { readonly op: 'navigate'; readonly method: 'goto' | 'back' | 'forward'; readonly url?: string }

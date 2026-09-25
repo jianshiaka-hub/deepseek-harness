@@ -265,7 +265,7 @@ export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, exp
 export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, expectedUrl: string,
   input: unknown, approvedOrigins: readonly string[], phase: unknown,
   value: unknown): Promise<BrowserForeignInputState> {
-  if (!['select', 'verify', 'focus', 'check'].includes(phase as string) ||
+  if (!['select', 'verify', 'focus', 'check', 'keyFocus', 'keyCheck'].includes(phase as string) ||
     (phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) ||
     (phase !== 'verify' && value !== undefined)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
   const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
@@ -283,8 +283,13 @@ export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, e
       (['select','verify'].includes(${JSON.stringify(phase)})
         ? !['INPUT','TEXTAREA'].includes(node.tagName) ||
           node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type)
-        : node.tagName === 'INPUT' && !['text','search','email','url','tel','number'].includes(node.type) ||
-          !['INPUT','TEXTAREA'].includes(node.tagName) && !node.isContentEditable)) {
+        : ['focus','check'].includes(${JSON.stringify(phase)})
+          ? node.tagName === 'INPUT' && !['text','search','email','url','tel','number'].includes(node.type) ||
+            !['INPUT','TEXTAREA'].includes(node.tagName) && !node.isContentEditable
+          : node.tagName === 'INPUT' && ['password','hidden','file'].includes(node.type) ||
+            !['INPUT','TEXTAREA','SELECT','BUTTON'].includes(node.tagName) &&
+              !(node.tagName === 'A' && node.hasAttribute('href')) &&
+              !node.isContentEditable && !(Number.isInteger(node.tabIndex) && node.tabIndex >= 0))) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     }
     ${phase === 'select' ? `node.focus();
@@ -292,9 +297,9 @@ export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, e
     node.select();
     if (node.selectionStart !== 0 || node.selectionEnd !== node.value.length) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
-    }` : phase === 'focus' ? `node.focus();
+    }` : phase === 'focus' || phase === 'keyFocus' ? `node.focus();
     if (document.activeElement !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');`
-      : phase === 'check' ? `if (document.activeElement !== node) {
+      : phase === 'check' || phase === 'keyCheck' ? `if (document.activeElement !== node) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     }` : `if (document.activeElement !== node || node.value !== ${JSON.stringify(value)}) {
       throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED');

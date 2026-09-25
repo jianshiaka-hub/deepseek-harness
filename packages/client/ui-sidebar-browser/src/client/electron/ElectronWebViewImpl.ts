@@ -576,6 +576,9 @@ export class ElectronWebViewImpl implements BrowserFrame {
   private async nativeKey(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'key' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
     const keyboard = sidebarKeyEvent(action.key)
+    if (action.ref?.startsWith('x')) {
+      return this.nativeForeignKey(element, expectedUrl, action, stillSelected, keyboard)
+    }
     const code = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
       ${guestDomHelpers}
@@ -603,6 +606,41 @@ export class ElectronWebViewImpl implements BrowserFrame {
     await element.sendInputEvent({ type: 'keyDown', ...keyboard })
     if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
     await element.sendInputEvent({ type: 'keyUp', ...keyboard })
+    return { url: expectedUrl, title: focused.title, performed: true }
+  }
+
+  private async nativeForeignKey(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'key' }>, stillSelected: () => boolean,
+    keyboard: { keyCode: string; modifiers: SidebarKeyModifier[] }): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    const ref = action.ref
+    if (lease === undefined || approved === undefined || ref === undefined || action.numericOnly === true ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE')
+    const focused = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'keyFocus')
+    if (focused.url !== expectedUrl || !approved.includes(focused.origin) ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    const checked = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'keyCheck')
+    if (checked.fingerprint !== focused.fingerprint || checked.origin !== focused.origin ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
+    if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== focused.fingerprint ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
+    let down = false
+    try {
+      await element.sendInputEvent({ type: 'keyDown', ...keyboard })
+      down = true
+    } finally {
+      if (down) await element.sendInputEvent({ type: 'keyUp', ...keyboard }).catch(() => {})
+    }
+    if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+      throw new Error('SIDEBAR_SELECTION_CHANGED')
+    }
     return { url: expectedUrl, title: focused.title, performed: true }
   }
 
