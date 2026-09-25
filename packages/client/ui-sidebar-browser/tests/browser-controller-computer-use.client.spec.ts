@@ -56,7 +56,7 @@ it('delegates approved observations and actions only to the selected desktop pag
   expect(await controller.locate(url, query)).toMatchObject({ count: 1, rows: [{ ref: 'observed-button' }] })
   const clip = { x: 1, y: 2, width: 30, height: 40 }
   expect(await controller.screenshot(url, clip, true)).toMatchObject({ viewport: { width: 800 } })
-  expect(frame.screenshot).toHaveBeenCalledWith(url, clip, true)
+  expect(frame.screenshot).toHaveBeenCalledWith(url, clip, true, undefined)
   expect(await controller.action(url, click)).toMatchObject({ performed: true })
   expect(frame.actionWithDialog).toHaveBeenCalledWith(url, click, expect.any(Function))
   expect(vi.mocked(frame.actionWithDialog!).mock.calls[0]?.[2]?.()).toBe(true)

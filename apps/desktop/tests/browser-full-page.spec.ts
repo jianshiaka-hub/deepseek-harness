@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { captureBrowserFullPage, type FullPageCaptureGuest } from '../src/browser-full-page.ts'
+import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport,
+  type ViewportCaptureGuest } from '../src/browser-full-page.ts'
 
 const url = 'https://example.test/page'
 
@@ -11,8 +12,14 @@ function png(width: number, height: number): string {
   return bytes.toString('base64')
 }
 
+function image(width: number, height: number) {
+  return { isEmpty: () => false, getSize: () => ({ width, height }),
+    crop: (rect: { width: number; height: number }) => image(rect.width, rect.height),
+    toPNG: () => Buffer.from(png(width, height), 'base64') }
+}
+
 function fixture() {
-  const frame: FullPageCaptureGuest['mainFrame'] = {
+  const frame: ViewportCaptureGuest['mainFrame'] = {
     detached: false, frameTreeNodeId: 1, origin: 'https://example.test', url, framesInSubtree: [],
   }
   frame.framesInSubtree.push(frame)
@@ -33,6 +40,7 @@ function fixture() {
     isLoadingMainFrame: () => state.loading,
     getURL: () => state.url,
     getTitle: () => 'Example',
+    capturePage: vi.fn(async () => image(2, 3)),
     mainFrame: frame,
     debugger: {
       isAttached: () => state.attached,
@@ -40,7 +48,7 @@ function fixture() {
       detach: () => { state.attached = false },
       sendCommand,
     },
-  } satisfies FullPageCaptureGuest
+  } satisfies ViewportCaptureGuest
   return { guest, frame, state, sendCommand }
 }
 
@@ -100,6 +108,56 @@ describe('main-owned Sidebar full-page capture', () => {
       .mockImplementationOnce(async () => ({ data: 'not-a-png' }))
     await expect(captureBrowserFullPage(h.guest, url)).rejects.toThrow('SIDEBAR_IMAGE_UNAVAILABLE')
     expect(h.state.attached).toBe(false)
+  })
+
+  it('captures a foreign frame only after its exact origin is approved and rejects a changed tree', async () => {
+    const h = fixture()
+    const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: 'https://embedded.test/widget', framesInSubtree: [] }
+    h.frame.framesInSubtree.push(foreign)
+    expect(auditBrowserFrames(h.guest, url).origins).toEqual(['https://example.test', 'https://embedded.test'])
+    await expect(captureBrowserFullPage(h.guest, url)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    await expect(captureBrowserFullPage(h.guest, url, undefined,
+      ['https://example.test', 'https://embedded.test'])).resolves.toMatchObject({ base64: png(2, 3) })
+    foreign.url = 'blob:https://embedded.test/5a41'
+    expect(auditBrowserFrames(h.guest, url, ['https://example.test', 'https://embedded.test']).origins)
+      .toEqual(['https://example.test', 'https://embedded.test'])
+    foreign.url = 'about:blank#inherited'
+    expect(auditBrowserFrames(h.guest, url, ['https://example.test', 'https://embedded.test']).origins)
+      .toEqual(['https://example.test', 'https://embedded.test'])
+    foreign.url = 'https://embedded.test/widget'
+    await expect(captureBrowserFullPage(h.guest, url, undefined,
+      ['https://example.test', 'https://example.test'])).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    h.sendCommand.mockImplementationOnce(async () => ({ cssContentSize: { x: 0, y: 0, width: 2, height: 3 } }))
+      .mockImplementationOnce(async () => ({ result: { value: 1 } }))
+      .mockImplementationOnce(async () => {
+        h.frame.framesInSubtree.push({ ...foreign, frameTreeNodeId: 3,
+          origin: 'https://new.test', url: 'https://new.test/' })
+        return { data: png(2, 3) }
+      })
+    await expect(captureBrowserFullPage(h.guest, url, undefined,
+      ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    expect(h.state.attached).toBe(false)
+  })
+
+  it('bounds viewport pixels and rejects a frame that changes while the native capture runs', async () => {
+    const h = fixture()
+    const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
+      url: 'https://embedded.test/widget', framesInSubtree: [] }
+    h.frame.framesInSubtree.push(foreign)
+    await expect(captureBrowserViewport(h.guest, url)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    await expect(captureBrowserViewport(h.guest, url, { x: 1, y: 1, width: 1, height: 2 },
+      ['https://example.test', 'https://embedded.test'])).resolves.toEqual({
+      url, title: 'Example', base64: png(1, 2), viewport: { width: 2, height: 3 },
+    })
+    h.guest.capturePage.mockImplementationOnce(async () => {
+      foreign.url = 'https://embedded.test/next'
+      return image(2, 3)
+    })
+    await expect(captureBrowserViewport(h.guest, url, undefined,
+      ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_NAVIGATED')
+    await expect(captureBrowserViewport(h.guest, url, { x: 2, y: 0, width: 1, height: 1 },
+      ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_CLIP_OUT_OF_BOUNDS')
   })
 
   it('discards pixels if a frame changes during capture', async () => {

@@ -54,6 +54,7 @@ async function boot() {
     keyedHooks: { browserState: () => undefined },
     snapshot: vi.fn(() => ({ frame, restoreTarget: undefined, addressFailure: undefined, addressRevision: 0 })),
     inspect: vi.fn(async () => ({ url, title: 'Example', text: 'Approved text' })),
+    frameOrigins: vi.fn(async () => ({ url, title: 'Example', origins: ['https://example.test'] })),
     locate: vi.fn(async () => ({ url, title: 'Example', count: 1, rows: [] })),
     screenshot: vi.fn(async () => ({ url, title: 'Example', base64: 'iVBORw0KGgo=', viewport: { width: 800, height: 600 } })),
     action: vi.fn(async () => ({ url, title: 'Example', performed: true as const })),
@@ -107,16 +108,21 @@ it('reports only the active Browser tab and routes approved observations and nav
   const current = h.select()
   expect(current).toMatchObject({ sessionId: 'session', tabId, observedUrl: url, controllerAvailable: true })
   expect(await h.execute(current!, command('inspect'), () => true)).toMatchObject({ text: 'Approved text' })
+  expect(await h.execute(current!, command('frameOrigins'), () => true))
+    .toMatchObject({ origins: ['https://example.test'] })
   const query = { method: 'getByRole' as const, value: 'button', exact: true }
   await h.execute(current!, command('locate', { query }), () => true)
-  await h.execute(current!, command('screenshot', { fullPage: true }), () => true)
+  await h.execute(current!, command('screenshot', { fullPage: true,
+    approvedFrameOrigins: ['https://example.test'] }), () => true)
   await h.execute(current!, command('dialog'), () => true)
   await h.execute(current!, command('dialogAction', { handle: 'dialog-id', decision: 'dismiss' }), () => true)
   await h.execute(current!, command('goto', { url: 'https://next.test/' }), () => true)
   await h.execute(current!, command('back'), () => true)
   await h.execute(current!, command('forward'), () => true)
   expect(h.face.locate).toHaveBeenCalledWith(tabId, url, query)
-  expect(h.face.screenshot).toHaveBeenCalledWith(tabId, url, undefined, true)
+  expect(h.face.frameOrigins).toHaveBeenCalledWith(tabId, url)
+  expect(h.face.screenshot).toHaveBeenCalledWith(tabId, url, undefined, true,
+    ['https://example.test'])
   expect(h.face.handleDialog).toHaveBeenCalledWith(tabId, url, 'dialog-id', 'dismiss', undefined, expect.any(Function))
   expect(h.face.navigate).toHaveBeenCalledWith(tabId, url, 'https://next.test/', expect.any(Function))
   expect(h.face.navigateHistory).toHaveBeenCalledWith(tabId, url, 'back', expect.any(Function))

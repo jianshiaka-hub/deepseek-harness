@@ -19,6 +19,8 @@ it('clears a failed load when the main page retries without a toolbar command', 
   const bridge: DesktopBrowserBridge = {
     acquire: vi.fn(async () => ({ lease: 'lease' as DesktopBrowserLeaseId, partition: 'partition' })),
     release: vi.fn(async () => {}), onOpenRequested: () => () => {},
+    auditFrames: vi.fn(async () => { throw new Error('not used in navigation test') }),
+    captureViewport: vi.fn(async () => { throw new Error('not used in navigation test') }),
     captureFullPage: vi.fn(async () => { throw new Error('not used in navigation test') }),
     beginPaste: vi.fn(async () => { throw new Error('not used in navigation test') }),
     finishPaste: vi.fn(async () => { throw new Error('not used in navigation test') }),

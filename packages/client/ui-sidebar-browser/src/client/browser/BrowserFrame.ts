@@ -169,10 +169,13 @@ export interface BrowserFrame extends HostObservable<BrowserFrameState> {
   readonly sandbox?: BrowserSandboxControl
   /** Inspect only the observed top-level HTTP(S) document in a desktop guest. */
   inspect?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  /** List only source origins in the selected guest for a subsequent site-grant check. */
+  frameOrigins?(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly origins: readonly string[] }>
   /** Query bounded DOM nodes in the observed guest without executing caller JavaScript. */
   locate?(expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
   /** Capture the observed guest's viewport or full page. */
-  screenshot?(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot>
+  screenshot?(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
   /** Perform a fixed action on the same observed desktop document. */
   action?(expectedUrl: string, action: BrowserDomAction, stillSelected?: () => boolean): Promise<BrowserDomActionResult>
   /** Register a bounded CDP watch before sending agent input, so modal actions can return. */

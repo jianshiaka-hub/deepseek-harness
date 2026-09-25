@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { app, clipboard, ClipboardItem, session, type BrowserWindow, type Session, type WebContents } from 'electron'
 import type { BrowserPageScreenshot, BrowserScreenshotClip, DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
-import { captureBrowserFullPage } from './browser-full-page.ts'
+import { auditBrowserFrames, captureBrowserFullPage, captureBrowserViewport, type BrowserFrameAudit } from './browser-full-page.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
 import { BrowserDragLease } from './browser-drag.ts'
 import { BrowserDialogLease, type BrowserDialogInfo } from './browser-dialog.ts'
@@ -297,34 +297,46 @@ export class DesktopBrowserGuests {
     return key
   }
 
-  /** Capture only a live guest owned by the authenticated application window. */
-  async captureFullPage(owner: WebContents, id: unknown, expectedUrl: unknown, clip: unknown): Promise<BrowserPageScreenshot> {
+  /** Audit only the current owned guest; URLs never leave the Desktop process. */
+  auditFrames(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins?: unknown): BrowserFrameAudit {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    if (approvedOrigins !== undefined && (!Array.isArray(approvedOrigins) ||
+      !approvedOrigins.every(origin => typeof origin === 'string'))) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    return auditBrowserFrames(guest, expectedUrl, approvedOrigins)
+  }
+
+  /** Capture the viewport in Main so frame navigation events cannot race the grant. */
+  async captureViewport(owner: WebContents, id: unknown, expectedUrl: unknown, clip: unknown,
+    approvedOrigins?: unknown): Promise<BrowserPageScreenshot> {
     if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
       throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     }
     const key = id as DesktopBrowserLeaseId
     const lease = this.leases.get(key)
-    if (lease === undefined || lease.owner !== owner || !lease.attached || lease.guest === undefined ||
-      lease.guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    let rectangle: BrowserScreenshotClip | undefined
-    if (clip !== undefined) {
-      if (typeof clip !== 'object' || clip === null || Array.isArray(clip) ||
-        Object.keys(clip).some(field => !['x', 'y', 'width', 'height'].includes(field)) ||
-        !('x' in clip) || !('y' in clip) || !('width' in clip) || !('height' in clip) ||
-        typeof clip.x !== 'number' || typeof clip.y !== 'number' ||
-        typeof clip.width !== 'number' || typeof clip.height !== 'number') {
-        throw new Error('SIDEBAR_CLIP_OUT_OF_BOUNDS')
-      }
-      rectangle = { x: clip.x, y: clip.y, width: clip.width, height: clip.height }
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const rectangle = this.captureRectangle(clip)
+    if (approvedOrigins !== undefined && (!Array.isArray(approvedOrigins) ||
+      !approvedOrigins.every(origin => typeof origin === 'string'))) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
-    const guest = lease.guest
     let changed = false
     const markChanged = (): void => { changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
-      const result = await captureBrowserFullPage(guest, expectedUrl, rectangle)
+      const result = await captureBrowserViewport(guest, expectedUrl, rectangle, approvedOrigins)
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during the awaited capture.
       if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
         throw new Error('SIDEBAR_NAVIGATED')
@@ -335,6 +347,53 @@ export class DesktopBrowserGuests {
       guest.off('will-frame-navigate', markChanged)
       guest.off('did-navigate-in-page', markChanged)
     }
+  }
+
+  /** Capture only a live guest owned by the authenticated application window. */
+  async captureFullPage(owner: WebContents, id: unknown, expectedUrl: unknown, clip: unknown,
+    approvedOrigins?: unknown): Promise<BrowserPageScreenshot> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    if (lease === undefined || lease.owner !== owner || !lease.attached || lease.guest === undefined ||
+      lease.guest.isDestroyed()) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const rectangle = this.captureRectangle(clip)
+    const guest = lease.guest
+    if (approvedOrigins !== undefined && (!Array.isArray(approvedOrigins) ||
+      !approvedOrigins.every(origin => typeof origin === 'string'))) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await captureBrowserFullPage(guest, expectedUrl, rectangle, approvedOrigins)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest events may fire during the awaited capture.
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || owner.isDestroyed()) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  private captureRectangle(clip: unknown): BrowserScreenshotClip | undefined {
+    if (clip === undefined) return undefined
+    if (typeof clip !== 'object' || clip === null || Array.isArray(clip) ||
+      Object.keys(clip).some(field => !['x', 'y', 'width', 'height'].includes(field)) ||
+      !('x' in clip) || !('y' in clip) || !('width' in clip) || !('height' in clip) ||
+      typeof clip.x !== 'number' || typeof clip.y !== 'number' ||
+      typeof clip.width !== 'number' || typeof clip.height !== 'number') {
+      throw new Error('SIDEBAR_CLIP_OUT_OF_BOUNDS')
+    }
+    return { x: clip.x, y: clip.y, width: clip.width, height: clip.height }
   }
 
   /**

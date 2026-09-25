@@ -76,6 +76,8 @@ describe('ui-sidebar-browser apply', () => {
     const bridge: DesktopBrowserBridge = {
       acquire,
       release: vi.fn(async () => {}),
+      auditFrames: vi.fn(async () => { throw new Error('not used in apply test') }),
+      captureViewport: vi.fn(async () => { throw new Error('not used in apply test') }),
       captureFullPage: vi.fn(async () => { throw new Error('not used in apply test') }),
       beginPaste: vi.fn(async () => { throw new Error('not used in apply test') }),
       finishPaste: vi.fn(async () => { throw new Error('not used in apply test') }),

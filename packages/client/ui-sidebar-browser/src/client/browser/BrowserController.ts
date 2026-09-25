@@ -83,6 +83,16 @@ export class BrowserController implements HostObservable<BrowserControllerState>
   }
 
   /**
+   * List embedded source origins in the selected document for per-site approval.
+   * @param expectedUrl - Exact selected-tab URL approved by the Host.
+   * @returns Only bounded website origins, with the selected tab identity.
+   */
+  frameOrigins(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly origins: readonly string[] }> {
+    if (this.disposed || this.page.frame.frameOrigins === undefined) throw new Error('SIDEBAR_FRAME_AUDIT_UNAVAILABLE')
+    return this.page.frame.frameOrigins(expectedUrl)
+  }
+
+  /**
    * Query the approved selected document with a bounded locator.
    * @param expectedUrl - Exact observed URL approved by the Host.
    * @param query - Selector steps and optional one-field projection.
@@ -98,11 +108,13 @@ export class BrowserController implements HostObservable<BrowserControllerState>
    * @param expectedUrl - exact observed URL approved by the Host.
    * @param clip - optional rectangle within the viewport or full page.
    * @param fullPage - capture the complete CSS page when true.
+   * @param approvedOrigins - exact frame origins already approved by the Host.
    * @returns PNG bytes and CSS viewport or page dimensions.
    */
-  screenshot(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot> {
+  screenshot(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot> {
     if (this.disposed || this.page.frame.screenshot === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    return this.page.frame.screenshot(expectedUrl, clip, fullPage)
+    return this.page.frame.screenshot(expectedUrl, clip, fullPage, approvedOrigins)
   }
 
   /**
@@ -347,10 +359,16 @@ export interface BrowserInjected {
   snapshot(tabId: TabId): BrowserControllerState | undefined
   /** Inspect one mounted desktop tab. */
   inspect(tabId: TabId, expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly text: string }>
+  frameOrigins(tabId: TabId, expectedUrl: string): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly origins: readonly string[]
+  }>
   /** Query a bounded set of DOM nodes in the selected desktop tab. */
   locate(tabId: TabId, expectedUrl: string, query: BrowserLocateQuery): Promise<BrowserLocateResult>
   /** Capture the visible viewport of one mounted desktop tab. */
-  screenshot(tabId: TabId, expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean): Promise<BrowserPageScreenshot>
+  screenshot(tabId: TabId, expectedUrl: string, clip?: BrowserScreenshotClip, fullPage?: boolean,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
   /** Perform one fixed action on a mounted desktop tab. */
   action(tabId: TabId, expectedUrl: string, action: BrowserDomAction, stillSelected?: () => boolean): Promise<BrowserDomDialogResult>
   /** Read or resolve a modal from the immediately preceding watched action. */
@@ -408,8 +426,9 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
     keyedHooks: { browserState: key => controller(key as TabId) },
     snapshot: id => controller(id)?.getSnapshot(),
     inspect: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.inspect(expectedUrl) },
+    frameOrigins: (id, expectedUrl) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.frameOrigins(expectedUrl) },
     locate: (id, expectedUrl, query) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.locate(expectedUrl, query) },
-    screenshot: (id, expectedUrl, clip, fullPage) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.screenshot(expectedUrl, clip, fullPage) },
+    screenshot: (id, expectedUrl, clip, fullPage, approvedOrigins) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.screenshot(expectedUrl, clip, fullPage, approvedOrigins) },
     action: (id, expectedUrl, action, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.action(expectedUrl, action, stillSelected) },
     dialog: (id, expectedUrl, stillSelected) => { const found = controller(id); if (found === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE'); return found.dialog(expectedUrl, stillSelected) },
     pendingDialogUrl: id => controller(id)?.pendingDialogUrl(),

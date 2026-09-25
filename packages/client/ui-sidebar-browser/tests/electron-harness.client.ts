@@ -11,9 +11,20 @@ let sequence = 0
 export function electronFixture(initial?: BrowserTabState) {
   const opens = new Set<(url: string) => void>()
   const reservation: DesktopBrowserReservation = { lease: `lease-${++sequence}` as DesktopBrowserLeaseId, partition: 'partition' }
+  const frameAudit = { origins: ['https://example.test'], fingerprint: 'frame-1' }
   const bridge = {
     acquire: vi.fn(async (_workspace: string) => reservation),
     release: vi.fn(async (_lease: DesktopBrowserLeaseId) => {}),
+    auditFrames: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, approved?: readonly string[]) => {
+      if (approved !== undefined && frameAudit.origins.some(origin => !approved.includes(origin))) {
+        throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+      }
+      return { origins: [...frameAudit.origins], fingerprint: frameAudit.fingerprint }
+    }),
+    captureViewport: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
+      url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+      viewport: { width: 1, height: 1 },
+    })),
     captureFullPage: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
       url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
       viewport: { width: 1, height: 1 },
@@ -68,7 +79,7 @@ export function electronFixture(initial?: BrowserTabState) {
   host.id = `electron-fixture-${sequence}`
   document.body.append(host)
   return {
-    ...page, presentation, bridge, workspace, persist, openRequested, opens, guests, host, reservation,
+    ...page, presentation, bridge, frameAudit, workspace, persist, openRequested, opens, guests, host, reservation,
     mount: () => presentation.mount(host.id),
     async guest() {
       await vi.waitFor(() => { expectGuest() })

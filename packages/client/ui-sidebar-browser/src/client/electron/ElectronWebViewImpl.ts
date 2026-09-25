@@ -239,42 +239,6 @@ const guestDomHelpers = String.raw`
   };
 `
 
-/** A viewport image includes child-frame pixels; reject it unless every reachable frame stays at the approved origin. */
-const screenshotFrameGuard = String.raw`
-  const collectFrames = (root) => {
-    const frames = [...root.querySelectorAll('iframe,frame')];
-    for (const node of root.querySelectorAll('*')) {
-      if (node.shadowRoot) frames.push(...collectFrames(node.shadowRoot));
-    }
-    return frames;
-  };
-  const inspectFrames = (doc, depth, counter) => {
-    if (depth > 8) throw new Error('SIDEBAR_FRAME_LIMIT');
-    for (const frame of collectFrames(doc)) {
-      if (++counter.count > 100) throw new Error('SIDEBAR_FRAME_LIMIT');
-      try {
-        const source = frame.getAttribute('src');
-        if (source) {
-          const target = new URL(source, doc.baseURI);
-          if (['http:','https:'].includes(target.protocol) && target.origin !== location.origin) {
-            throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED');
-          }
-        }
-        const child = frame.contentDocument;
-        if (!child || (child.location.origin !== location.origin &&
-          child.location.href !== 'about:blank' && child.location.href !== 'about:srcdoc')) {
-          throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED');
-        }
-        inspectFrames(child, depth + 1, counter);
-      } catch (error) {
-        if (error?.message === 'SIDEBAR_FRAME_LIMIT') throw error;
-        throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED');
-      }
-    }
-  };
-  inspectFrames(document, 0, {count:0});
-`
-
 /** Owns native history and translates Electron observations into common frame state. */
 export class ElectronWebViewImpl implements BrowserFrame {
   private readonly store: SnapshotStore<BrowserFrameState>
@@ -422,6 +386,21 @@ export class ElectronWebViewImpl implements BrowserFrame {
       !('url' in value) || value.url !== expectedUrl || !('title' in value) || typeof value.title !== 'string' ||
       !('text' in value) || typeof value.text !== 'string') throw new Error('SIDEBAR_NAVIGATED')
     return { url: value.url, title: value.title, text: value.text }
+  }
+
+  /** Reveal only current frame origins to the authenticated Host's grant flow. */
+  async frameOrigins(expectedUrl: string): Promise<{ readonly url: string; readonly title: string; readonly origins: readonly string[] }> {
+    const element = this.element
+    const lease = this.lease
+    if (element === undefined || lease === undefined || !this.ready || this.lifetime.signal.aborted ||
+      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
+      element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const audit = await this.bridge.auditFrames(lease, expectedUrl)
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- The selected guest can change while IPC awaits.
+    if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
+      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
+      element.getURL() !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
+    return { url: expectedUrl, title: element.getTitle().slice(0, 512), origins: audit.origins }
   }
 
   /** Run one fixed locator query without exporting a page-wide DOM snapshot. */
@@ -611,60 +590,36 @@ export class ElectronWebViewImpl implements BrowserFrame {
   }
 
   /** Capture the selected guest's viewport or full page, then recheck its document and lifetime. */
-  async screenshot(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage = false): Promise<BrowserPageScreenshot> {
+  async screenshot(expectedUrl: string, clip?: BrowserScreenshotClip, fullPage = false,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot> {
     const element = this.element
-    if (element === undefined || !this.ready || this.lifetime.signal.aborted ||
+    const lease = this.lease
+    if (element === undefined || lease === undefined || !this.ready || this.lifetime.signal.aborted ||
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     const guard = `(() => {
       if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
-      ${screenshotFrameGuard}
       return location.href;
     })()`
     if (await element.executeJavaScript(guard) !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
+    const approved = approvedOrigins ?? [new URL(expectedUrl).origin]
+    const before = await this.bridge.auditFrames(lease, expectedUrl, approved)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest state may change while the guard awaits.
-    if (this.element !== element || this.lifetime.signal.aborted ||
+    if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
-    if (fullPage) {
-      const lease = this.lease
-      if (lease === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-      const result = await this.bridge.captureFullPage(lease, expectedUrl, clip)
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Lease and guest may change during capture.
-      if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
-        this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
-        element.getURL() !== expectedUrl || result.url !== expectedUrl ||
-        await element.executeJavaScript(guard) !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
-      return result
+    const result = fullPage
+      ? await this.bridge.captureFullPage(lease, expectedUrl, clip, approved)
+      : await this.bridge.captureViewport(lease, expectedUrl, clip, approved)
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Lease and guest may change during capture.
+    if (this.element !== element || this.lease !== lease || this.lifetime.signal.aborted ||
+      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
+      element.getURL() !== expectedUrl || result.url !== expectedUrl ||
+      await element.executeJavaScript(guard) !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
+    if ((await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+      throw new Error('SIDEBAR_NAVIGATED')
     }
-    const image = await element.capturePage()
-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest may change during capture.
-    if (this.element !== element || this.lifetime.signal.aborted ||
-      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
-      element.getURL() !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
-    if (await element.executeJavaScript(guard) !== expectedUrl ||
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Guest may change while the guard awaits.
-      this.element !== element || this.lifetime.signal.aborted ||
-      this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
-      element.getURL() !== expectedUrl) throw new Error('SIDEBAR_NAVIGATED')
-    const { width, height } = image.getSize()
-    if (image.isEmpty() || !Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
-      width < 1 || height < 1 || width > 8192 || height > 8192) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
-    if (clip !== undefined && (!Number.isSafeInteger(clip.x) || !Number.isSafeInteger(clip.y) ||
-      !Number.isSafeInteger(clip.width) || !Number.isSafeInteger(clip.height) ||
-      clip.x < 0 || clip.y < 0 || clip.width < 1 || clip.height < 1 ||
-      clip.x + clip.width > width || clip.y + clip.height > height)) throw new Error('SIDEBAR_CLIP_OUT_OF_BOUNDS')
-    const output = clip === undefined ? image : image.crop(clip)
-    const outputSize = output.getSize()
-    if (output.isEmpty() || (clip !== undefined &&
-      (outputSize.width !== clip.width || outputSize.height !== clip.height))) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
-    const dataUrl = output.toDataURL()
-    const prefix = 'data:image/png;base64,'
-    if (!dataUrl.startsWith(prefix) || dataUrl.length - prefix.length > 5_592_408) {
-      throw new Error('SIDEBAR_IMAGE_TOO_LARGE')
-    }
-    return { url: expectedUrl, title: element.getTitle().slice(0, 512),
-      base64: dataUrl.slice(prefix.length), viewport: { width, height } }
+    return result
   }
 
   /** Run one allow-listed action against the currently selected document. */

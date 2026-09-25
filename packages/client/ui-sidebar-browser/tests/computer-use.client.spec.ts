@@ -656,7 +656,7 @@ it('drags along a checked native pointer path and releases the button if selecti
   }
 })
 
-it('captures the selected guest viewport and discards an image if navigation starts during capture', async () => {
+it('captures the selected guest viewport through Main and discards changed frame trees', async () => {
   const h = electronFixture()
   const url = 'https://example.test/'
   try {
@@ -668,61 +668,52 @@ it('captures the selected guest viewport and discards an image if navigation sta
     guest.state.loading = false
     guest.emit('dom-ready')
     guest.emit('did-navigate')
-    const picture = { isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }),
-      crop: vi.fn(() => picture),
-      toDataURL: () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' }
-    const capturePage = vi.fn(async () => picture)
-    Object.assign(guest.element, { capturePage,
+    Object.assign(guest.element, {
       executeJavaScript: async (code: string) => runGuestScript(code, {
         location: { href: url, origin: 'https://example.test' }, document, URL,
-      }) })
+      }),
+    })
+    expect(await h.frame.frameOrigins?.(url)).toEqual({ url, title: 'Example', origins: ['https://example.test'] })
     expect(await h.frame.screenshot?.(url)).toEqual({ url, title: 'Example',
       base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', viewport: { width: 1, height: 1 } })
-    expect(await h.frame.screenshot?.(url, { x: 0, y: 0, width: 1, height: 1 })).toMatchObject({
+    expect(h.bridge.captureViewport).toHaveBeenCalledWith(h.reservation.lease, url, undefined,
+      ['https://example.test'])
+    const clip = { x: 0, y: 0, width: 1, height: 1 }
+    expect(await h.frame.screenshot?.(url, clip)).toMatchObject({
       viewport: { width: 1, height: 1 },
     })
-    expect(picture.crop).toHaveBeenCalledWith({ x: 0, y: 0, width: 1, height: 1 })
-    await expect(h.frame.screenshot?.(url, { x: 1, y: 0, width: 1, height: 1 }))
-      .rejects.toThrow('SIDEBAR_CLIP_OUT_OF_BOUNDS')
-
-    const sameOrigin = document.createElement('iframe')
-    document.body.append(sameOrigin)
-    expect(await h.frame.screenshot?.(url)).toMatchObject({ url })
-    const nestedCrossOrigin = sameOrigin.contentDocument!.createElement('iframe')
-    nestedCrossOrigin.src = 'https://other.test/nested'
-    sameOrigin.contentDocument!.body.append(nestedCrossOrigin)
+    expect(h.bridge.captureViewport).toHaveBeenLastCalledWith(h.reservation.lease, url, clip,
+      ['https://example.test'])
+    h.frameAudit.origins.push('https://other.test')
+    const capturesBefore = h.bridge.captureViewport.mock.calls.length
     await expect(h.frame.screenshot?.(url)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
-    sameOrigin.remove()
+    expect(h.bridge.captureViewport.mock.calls.length).toBe(capturesBefore)
+    expect(await h.frame.screenshot?.(url, undefined, false,
+      ['https://example.test', 'https://other.test'])).toMatchObject({ url })
+    h.frameAudit.origins.pop()
 
-    const crossOrigin = document.createElement('iframe')
-    crossOrigin.src = 'https://other.test/frame'
-    document.body.append(crossOrigin)
-    const capturesBefore = capturePage.mock.calls.length
-    await expect(h.frame.screenshot?.(url)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
-    expect(capturePage.mock.calls.length).toBe(capturesBefore)
-    crossOrigin.remove()
-
-    let release: ((value: typeof picture) => void) | undefined
-    Object.assign(guest.element, { capturePage: () => new Promise<typeof picture>((resolve) => { release = resolve }) })
+    let release: (() => void) | undefined
+    h.bridge.captureViewport.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => { resolve({ url, title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+        viewport: { width: 1, height: 1 } }) }
+    }))
     const pending = h.frame.screenshot?.(url)
     await vi.waitFor(() => { expect(release).toBeDefined() })
     guest.state.loading = true
     guest.emit('did-start-loading')
-    release?.(picture)
+    release?.()
     await expect(pending).rejects.toThrow('SIDEBAR_NAVIGATED')
 
     guest.state.loading = false
     guest.emit('did-stop-loading')
-    release = undefined
+    h.bridge.captureViewport.mockImplementationOnce(async () => {
+      h.frameAudit.fingerprint = 'frame-2'
+      return { url, title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+        viewport: { width: 1, height: 1 } }
+    })
     const pendingFrame = h.frame.screenshot?.(url)
-    await vi.waitFor(() => { expect(release).toBeDefined() })
-    const arrivingFrame = document.createElement('iframe')
-    arrivingFrame.src = 'https://other.test/arrived-during-capture'
-    document.body.append(arrivingFrame)
-    const releaseFrame = release as ((value: typeof picture) => void) | undefined
-    releaseFrame?.(picture)
-    await expect(pendingFrame).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
-    arrivingFrame.remove()
+    await expect(pendingFrame).rejects.toThrow('SIDEBAR_NAVIGATED')
+    h.frameAudit.fingerprint = 'frame-1'
   } finally { await h.dispose() }
 })
 
@@ -743,16 +734,13 @@ it('routes full-page capture through the owning lease and rechecks frame origins
     }) })
     const clip = { x: 0, y: 0, width: 1, height: 1 }
     expect(await h.frame.screenshot?.(url, clip, true)).toMatchObject({ url, viewport: { width: 1, height: 1 } })
-    expect(h.bridge.captureFullPage).toHaveBeenCalledWith(h.reservation.lease, url, clip)
-    const crossOrigin = document.createElement('iframe')
+    expect(h.bridge.captureFullPage).toHaveBeenCalledWith(h.reservation.lease, url, clip,
+      ['https://example.test'])
     h.bridge.captureFullPage.mockImplementationOnce(async () => {
-      crossOrigin.src = 'https://foreign.test/frame'
-      document.body.append(crossOrigin)
+      h.frameAudit.fingerprint = 'frame-2'
       return { url, title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
         viewport: { width: 1, height: 1 } }
     })
-    try {
-      await expect(h.frame.screenshot?.(url, undefined, true)).rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
-    } finally { crossOrigin.remove() }
+    await expect(h.frame.screenshot?.(url, undefined, true)).rejects.toThrow('SIDEBAR_NAVIGATED')
   } finally { await h.dispose() }
 })

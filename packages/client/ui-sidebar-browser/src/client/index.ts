@@ -91,6 +91,7 @@ export function apply(ctx: Context): void {
       if (controller === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
       const tabId = tab.tabId as Parameters<BrowserInjected['inspect']>[0]
       if (command.op === 'inspect') return controller.inspect(tabId, command.expectedUrl)
+      if (command.op === 'frameOrigins') return controller.frameOrigins(tabId, command.expectedUrl)
       if (command.op === 'locate') {
         if (command.args.query === undefined) throw new Error('SIDEBAR_LOCATOR_UNAVAILABLE')
         return controller.locate(tabId, command.expectedUrl, command.args.query)
@@ -104,7 +105,7 @@ export function apply(ctx: Context): void {
           command.args.decision, command.args.text, stillSelected)
       }
       if (command.op === 'screenshot') return controller.screenshot(tabId, command.expectedUrl, command.args.clip,
-        command.args.fullPage)
+        command.args.fullPage, command.args.approvedFrameOrigins)
       if (command.op === 'goto') {
         if (command.args.url === undefined) throw new Error('SIDEBAR_URL_UNAVAILABLE')
         return controller.navigate(tabId, command.expectedUrl, command.args.url, stillSelected)

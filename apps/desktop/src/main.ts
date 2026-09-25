@@ -662,9 +662,20 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.release(event.sender, lease)
   })
-  ipcMain.handle(DESKTOP_IPC.browserCaptureFullPage, (event, lease: unknown, expectedUrl: unknown, clip: unknown) => {
+  ipcMain.handle(DESKTOP_IPC.browserAuditFrames, (event, lease: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown) => {
     assertProductSender(event)
-    return browserGuests.captureFullPage(event.sender, lease, expectedUrl, clip)
+    return browserGuests.auditFrames(event.sender, lease, expectedUrl, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserCaptureViewport, (event, lease: unknown, expectedUrl: unknown,
+    clip: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.captureViewport(event.sender, lease, expectedUrl, clip, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserCaptureFullPage, (event, lease: unknown, expectedUrl: unknown,
+    clip: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.captureFullPage(event.sender, lease, expectedUrl, clip, approvedOrigins)
   })
   ipcMain.handle(DESKTOP_IPC.browserPasteBegin, (event, lease: unknown, expectedUrl: unknown, payload: unknown) => {
     assertProductSender(event)

@@ -24,6 +24,12 @@ export interface BrowserPageScreenshot {
   readonly viewport: { readonly width: number; readonly height: number }
 }
 
+/** Only approved-current-tab source origins and a digest of the native frame tree. */
+export interface BrowserFrameAudit {
+  readonly origins: readonly string[]
+  readonly fingerprint: string
+}
+
 /** CSS-pixel rectangle within the selected page's capture extent. */
 export interface BrowserScreenshotClip {
   readonly x: number
@@ -44,8 +50,15 @@ export interface DesktopBrowserBridge {
   acquire(workspace: string): Promise<DesktopBrowserReservation>
   /** @param lease - the caller's reservation. @returns after its guest has been destroyed. */
   release(lease: DesktopBrowserLeaseId): Promise<void>
+  /** List current frame origins or verify a supplied exact-origin grant set. */
+  auditFrames(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins?: readonly string[]): Promise<BrowserFrameAudit>
+  /** Capture the current viewport with native frame-event and site checks. */
+  captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
   /** Capture the exact owned guest's full page after its caller checks the selected tab and frame origin. */
-  captureFullPage(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip): Promise<BrowserPageScreenshot>
+  captureFullPage(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
   /** Temporarily stage a confirmed paste for this exact guest URL. */
   beginPaste(lease: DesktopBrowserLeaseId, expectedUrl: string,
     payload: { readonly text: string; readonly format: 'text' | 'md' | 'html'; readonly plainText?: string }): Promise<string>

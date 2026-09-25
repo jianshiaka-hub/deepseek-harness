@@ -18,6 +18,7 @@ interface SidebarResult {
   readonly url: string
   readonly title: string
   readonly text?: string
+  readonly origins?: readonly string[]
   readonly rows?: readonly { readonly ref: string; readonly role: string; readonly name: string }[]
   readonly base64?: string
   readonly viewport?: { readonly width: number; readonly height: number }
@@ -39,7 +40,7 @@ interface Command {
   readonly id: string
   readonly sessionId: string
   readonly tabId: string
-  readonly op: 'inspect' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'dialog' | 'dialogAction'
+  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'dialog' | 'dialogAction'
   readonly expectedUrl: string
   readonly args: {
     readonly approvedOrigin: string
@@ -65,6 +66,7 @@ interface Command {
     readonly dy?: number
     readonly clip?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
     readonly fullPage?: boolean
+    readonly approvedFrameOrigins?: readonly string[]
     readonly handle?: string
     readonly decision?: 'accept' | 'dismiss'
   }
@@ -139,12 +141,14 @@ export class SidebarComputerUseReporter {
         } else if (['goto', 'back', 'forward', 'dialogAction'].includes(command.op)) {
           ok = this.selectionRevision === selectionRevision && this.sameIdentity(command, after) &&
             after.controllerAvailable && after.observedUrl === value.url && value.performed === true
-        } else if (command.op === 'inspect' || command.op === 'locate' || command.op === 'screenshot' || command.op === 'dialog') {
+        } else if (command.op === 'inspect' || command.op === 'frameOrigins' || command.op === 'locate' || command.op === 'screenshot' || command.op === 'dialog') {
+          const outputValid = command.op === 'inspect' ? typeof value.text === 'string'
+            : command.op === 'locate' ? Array.isArray(value.rows)
+              : command.op === 'frameOrigins' ? Array.isArray(value.origins)
+                : command.op === 'dialog' ? value.dialog === null || value.dialog !== undefined
+                  : typeof value.base64 === 'string' && value.viewport !== undefined
           ok = this.revision === revision && this.same(command, after) && value.url === command.expectedUrl &&
-            (command.op === 'inspect' ? typeof value.text === 'string' : command.op === 'locate'
-              ? Array.isArray(value.rows) : command.op === 'dialog'
-                ? value.dialog === null || value.dialog !== undefined :
-                typeof value.base64 === 'string' && value.viewport !== undefined)
+            outputValid
         } else {
           ok = this.revision === revision && after !== null && after.sessionId === command.sessionId &&
             after.tabId === command.tabId && value.performed === true
