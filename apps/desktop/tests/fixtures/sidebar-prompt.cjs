@@ -7,7 +7,7 @@ async function run() {
   const server = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
     if (request.url === '/frame') {
-      response.end('<!doctype html><title>Same-origin frame</title><script>window.runFramePrompt = () => prompt("Frame question", "Frame default")</script>')
+      response.end('<!doctype html><title>Same-origin frame</title><script>window.runFramePrompt = () => { parent.__frameResult = prompt("Frame question", "Frame default") }</script>')
       return
     }
     response.end(`<!doctype html><title>Prompt lease</title><script>
@@ -82,6 +82,22 @@ async function run() {
     if (await ask('approved text', 'accept') !== 'approved text') throw new Error('Accepted prompt answer was lost')
     if (await ask(undefined, 'accept') !== 'Private default') throw new Error('Default prompt answer was lost')
     if (await ask(undefined, 'dismiss') !== null) throw new Error('Dismissed prompt did not return null')
+    const askFrame = async (answer, action) => {
+      await guest.executeJavaScript("window.__frameResult = 'pending'")
+      const token = await guests.beginDialog(window.webContents, reservation.lease, url)
+      await guest.executeJavaScript("setTimeout(() => document.querySelector('iframe').contentWindow.runFramePrompt(), 0)")
+      const dialog = await guests.waitDialog(window.webContents, reservation.lease, token, 3000)
+      if (dialog?.type !== 'prompt') throw new Error(`Expected same-origin frame prompt, got ${JSON.stringify(dialog)}`)
+      await guests.handleDialog(window.webContents, reservation.lease, token, dialog.id, action, answer)
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const result = await guest.executeJavaScript('window.__frameResult')
+        if (result !== 'pending') return result
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      throw new Error('Same-origin frame prompt did not resume')
+    }
+    if (await askFrame('frame approved', 'accept') !== 'frame approved') throw new Error('Frame prompt answer was lost')
+    if (await askFrame(undefined, 'dismiss') !== null) throw new Error('Frame prompt dismissal was lost')
     await guest.executeJavaScript('setTimeout(window.runPrompt, 0)')
     for (let attempt = 0; attempt < 50; attempt++) {
       if (await guest.executeJavaScript('window.__result') === null) break
@@ -90,7 +106,7 @@ async function run() {
     if (await guest.executeJavaScript('window.__result') !== null || guest.debugger.isAttached()) {
       throw new Error('Unwatched prompt or debugger lease remained active')
     }
-    process.stdout.write('Electron Sidebar prompt PASS: owned guest, opaque handle, accept/dismiss, no page text in IPC\n')
+    process.stdout.write('Electron Sidebar prompt PASS: owned guest, same-origin frame, opaque handle, accept/dismiss, no page text in IPC\n')
     app.exit(0)
   } catch (error) {
     process.stderr.write(String(error?.stack ?? error) + '\n')

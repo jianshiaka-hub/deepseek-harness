@@ -38,12 +38,28 @@ interface ActiveDialogWatch {
   timer: ReturnType<typeof setTimeout> | undefined
   dialog: BrowserDialogInfo | undefined
   promptReply: ((value: PromptResponse) => void) | undefined
+  framePromptScriptId: string | undefined
   closed: boolean
   detached: boolean
 }
 
 const EMPTY_WATCH_MS = 30_000
 const OPEN_WATCH_MS = 300_000
+
+/** Electron does not implement native prompt() in subframes. Forward only a
+ * frame from the watched origin to the already sandboxed top-frame shim. */
+function sameOriginFramePromptScript(expectedUrl: string): string {
+  const origin = JSON.stringify(new URL(expectedUrl).origin)
+  return `(() => {
+    if (self === top || location.origin !== ${origin}) return;
+    try {
+      if (top.location.origin !== ${origin}) return;
+      window.prompt = function (message, defaultValue) {
+        return top.prompt(message, defaultValue);
+      };
+    } catch { /* Cross-origin frames retain Electron's unsupported prompt. */ }
+  })();`
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -80,6 +96,7 @@ export class BrowserDialogLease {
     const active: ActiveDialogWatch = {
       token, guest, expectedUrl, waiters: new Set(), timer: undefined, dialog: undefined,
       promptReply: undefined,
+      framePromptScriptId: undefined,
       closed: false, detached: false,
       onMessage: (_event, method, params): void => {
         if (method !== 'Page.javascriptDialogOpening' || !record(params)) return
@@ -112,15 +129,26 @@ export class BrowserDialogLease {
       guest.on('did-navigate', active.onNavigate)
       guest.on('destroyed', active.onDestroyed)
       await guest.debugger.sendCommand('Page.enable')
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Debugger events can invalidate an awaited Page.enable.
-      if (invalidated || guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl ||
-        active.detached) throw new Error('SIDEBAR_NAVIGATED')
+      this.assertValidStart(active, invalidated)
+      const injected = await guest.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+        source: sameOriginFramePromptScript(expectedUrl), runImmediately: true,
+      })
+      if (!record(injected) || typeof injected.identifier !== 'string') {
+        throw new Error('SIDEBAR_DIALOG_FRAME_PROMPT_UNAVAILABLE')
+      }
+      active.framePromptScriptId = injected.identifier
+      this.assertValidStart(active, invalidated)
       this.watches.set(token, active)
       if (active.dialog === undefined) {
         active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, EMPTY_WATCH_MS)
       }
       return token
     } catch (error) {
+      if (active.framePromptScriptId !== undefined && guest.debugger.isAttached()) {
+        await guest.debugger.sendCommand('Page.removeScriptToEvaluateOnNewDocument', {
+          identifier: active.framePromptScriptId,
+        }).catch(() => {})
+      }
       guest.debugger.off('message', active.onMessage)
       guest.debugger.off('detach', active.onDetach)
       guest.off('did-navigate', active.onNavigate)
@@ -214,6 +242,11 @@ export class BrowserDialogLease {
         if (active.dialog !== undefined) {
           await active.guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
         }
+        if (active.framePromptScriptId !== undefined) {
+          await active.guest.debugger.sendCommand('Page.removeScriptToEvaluateOnNewDocument', {
+            identifier: active.framePromptScriptId,
+          }).catch(() => {})
+        }
       } finally { if (active.guest.debugger.isAttached()) active.guest.debugger.detach() }
     }
   }
@@ -222,5 +255,9 @@ export class BrowserDialogLease {
     return !active.guest.isDestroyed() &&
       (!active.guest.isLoadingMainFrame() || openingBeforeUnload || active.dialog?.type === 'beforeunload') &&
       active.guest.getURL() === active.expectedUrl
+  }
+
+  private assertValidStart(active: ActiveDialogWatch, invalidated: boolean): void {
+    if (invalidated || active.detached || !this.validGuest(active)) throw new Error('SIDEBAR_NAVIGATED')
   }
 }

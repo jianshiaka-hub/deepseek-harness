@@ -8,7 +8,8 @@ function fixture() {
   const guestEvents = new EventEmitter()
   const debuggerEvents = new EventEmitter()
   const state = { url, attached: false, destroyed: false, loading: false, failAttach: false }
-  const sendCommand = vi.fn(async (_method: string, _params?: object): Promise<object> => ({}))
+  const sendCommand = vi.fn(async (method: string, _params?: object): Promise<object> =>
+    method === 'Page.addScriptToEvaluateOnNewDocument' ? { identifier: 'frame-prompt-script' } : {})
   const debuggerPort = Object.assign(debuggerEvents, {
     isAttached: () => state.attached,
     attach: vi.fn(() => {
@@ -36,6 +37,9 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     const lease = new BrowserDialogLease()
     const token = await lease.begin(h.guest, url)
     expect(h.sendCommand).toHaveBeenCalledWith('Page.enable')
+    const injection = h.sendCommand.mock.calls.find(([method]) => method === 'Page.addScriptToEvaluateOnNewDocument')
+    expect(JSON.stringify(injection?.[1])).toContain('https://example.test')
+    expect(injection?.[1]).toHaveProperty('runImmediately', true)
     expect(lease.get(token)).toBeNull()
     const opened = lease.wait(token)
     h.open('confirm')
@@ -46,6 +50,9 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     await lease.handle(token, dialog!.id, 'accept')
     expect(h.sendCommand).toHaveBeenCalledWith('Page.handleJavaScriptDialog', { accept: true })
     expect(h.state.attached).toBe(false)
+    expect(h.sendCommand).toHaveBeenCalledWith('Page.removeScriptToEvaluateOnNewDocument', {
+      identifier: 'frame-prompt-script',
+    })
     expect(() => lease.get(token)).toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
     await expect(lease.handle(token, dialog!.id, 'accept')).rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
   })
