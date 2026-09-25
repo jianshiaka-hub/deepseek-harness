@@ -175,12 +175,24 @@ async function qualify() {
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
         .executeJavaScript('document.getElementById("name").value')`)
     assert.equal(value, 'Ada')
+    const checked = await control('/invoke', { sessionId,
+      code: `let agree = t.playwright.getByRole('checkbox',{name:'Agree'}); if (await agree.isChecked()) throw Error('ALREADY_CHECKED'); await agree.check(); await agree.check(); return await agree.isChecked();` })
+    await writeFile(join(root, 'computer-use-check.json'), JSON.stringify({ sessionId, tool: checked }, null, 2))
+    assert.equal(checked.result?.value?.ok, true, JSON.stringify(checked.result))
+    assert.match(checked.result.value.result, /返回值：true/)
+    assert.equal(checked.approvals.filter(approval => approval.allowed).length, 5)
+    const unchecked = await control('/invoke', { sessionId,
+      code: `await agree.uncheck(); return await agree.isChecked();` })
+    await writeFile(join(root, 'computer-use-uncheck.json'), JSON.stringify({ sessionId, tool: unchecked }, null, 2))
+    assert.equal(unchecked.result?.value?.ok, true, JSON.stringify(unchecked.result))
+    assert.match(unchecked.result.value.result, /返回值：false/)
+    assert.equal(unchecked.approvals.filter(approval => approval.allowed).length, 6)
     const scrolled = await control('/invoke', { sessionId,
       code: `await t.getAXState({emit:false}); await t.scroll(1,'down',1); return 'scrolled';` })
     await writeFile(join(root, 'computer-use-scroll.json'), JSON.stringify({ sessionId, tool: scrolled }, null, 2))
     assert.equal(scrolled.result?.isError, false, JSON.stringify(scrolled.result))
     assert.equal(scrolled.result?.value?.ok, true, JSON.stringify(scrolled.result))
-    assert.equal(scrolled.approvals.filter(approval => approval.allowed).length, 4)
+    assert.equal(scrolled.approvals.filter(approval => approval.allowed).length, 6)
     await waitFor(() => window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
         .executeJavaScript('window.scrollY > 0')`), 'selected Browser page scroll', 5000)

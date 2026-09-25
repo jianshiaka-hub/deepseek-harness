@@ -114,7 +114,7 @@ export interface BrowserLocateSelector {
 export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly frames?: readonly string[]
   readonly scopes?: readonly BrowserLocateSelector[]
-  readonly projection?: 'visible' | 'enabled'
+  readonly projection?: 'visible' | 'enabled' | 'checked'
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
 }
 
@@ -128,6 +128,7 @@ export interface BrowserLocateResult {
     readonly name: string
     readonly visible?: boolean
     readonly enabled?: boolean
+    readonly checked?: boolean
   }[]
 }
 

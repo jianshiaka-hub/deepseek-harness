@@ -370,7 +370,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       this.store.getSnapshot().address !== 'observed' || this.store.getSnapshot().loading ||
       element.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     if (!validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection']) ||
-      query.projection !== undefined && !['visible', 'enabled'].includes(query.projection) ||
+      query.projection !== undefined && !['visible', 'enabled', 'checked'].includes(query.projection) ||
       query.scopes !== undefined && (!Array.isArray(query.scopes) || query.scopes.length < 1 ||
         query.scopes.length > 2 || query.scopes.some(scope => !validSidebarLocateSelector(scope))) ||
       query.position !== undefined &&
@@ -491,7 +491,17 @@ export class ElectronWebViewImpl implements BrowserFrame {
               [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
           })} : {}),
           ...(query.projection === 'enabled' ? {enabled:!node.matches(':disabled') &&
-            !node.closest('[aria-disabled="true"],[inert]')} : {})}];
+            !node.closest('[aria-disabled="true"],[inert]')} : {}),
+          ...(query.projection === 'checked' ? {checked:(() => {
+            if (!['checkbox','radio'].includes(role)) throw new Error('SIDEBAR_CHECK_UNAVAILABLE');
+            if (node.tagName === 'INPUT' && node.type === role) return node.checked;
+            const aria = node.getAttribute('aria-checked');
+            if (node.getAttribute('role') === role &&
+              (aria === 'true' || aria === 'false' || role === 'checkbox' && aria === 'mixed')) {
+              return aria === 'true';
+            }
+            throw new Error('SIDEBAR_CHECK_UNAVAILABLE');
+          })()} : {})}];
       })();
       return {url:location.href,title:document.title.slice(0,512),count,rows};
     })()`
