@@ -90,8 +90,40 @@ export interface BrowserFrameAudit {
 
 export interface BrowserForeignText {
   readonly fingerprint: string
-  readonly frames: readonly { readonly origin: string; readonly text: string }[]
+  readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
 }
+
+/** Fixed, bounded child-frame inspection. Form values and element handles stay inside the page. */
+const FOREIGN_FRAME_SNAPSHOT = String.raw`(() => {
+  const text = String(document.body?.innerText ?? '').slice(0,1000).replaceAll('[ref=','[ref =');
+  const selector = 'a,button,input,textarea,select,img[alt],area[alt],[role],[contenteditable],h1,h2,h3';
+  const nodes = [...document.querySelectorAll(selector)].slice(0,150);
+  const roles = [];
+  for (const node of nodes) {
+    if (roles.length >= 50 || node.closest('[aria-hidden="true"],[inert]')) continue;
+    const style = getComputedStyle(node);
+    if (style.visibility === 'hidden' || style.visibility === 'collapse' ||
+      ![...node.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) continue;
+    const rawRole = node.getAttribute('role') || '';
+    const role = /^[a-z][a-z0-9-]{0,31}$/.test(rawRole) ? rawRole :
+      node.tagName === 'INPUT' ? ({checkbox:'checkbox',radio:'radio',button:'button',submit:'button',
+        reset:'button',search:'searchbox',range:'slider',number:'spinbutton'})[node.type] || 'textbox' :
+      ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',
+        H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
+        (node.getAttribute('contenteditable') !== null ? 'textbox' : node.tagName.toLowerCase());
+    const ids = (node.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0,8);
+    const linked = ids.map(id => document.getElementById(id)?.innerText || '').join(' ').trim();
+    const labels = node.labels ? [...node.labels].slice(0,8).map(label => label.innerText || '').join(' ') : '';
+    const formField = ['INPUT','TEXTAREA','SELECT'].includes(node.tagName) &&
+      !['button','submit','reset'].includes(node.type);
+    const name = (linked || node.getAttribute('aria-label') || labels ||
+      (formField ? '' : node.tagName === 'INPUT' ? node.value : node.getAttribute('alt') || node.innerText) ||
+      node.getAttribute('title') || node.getAttribute('placeholder') || '')
+      .trim().replace(/\s+/g,' ').replaceAll('[ref=','[ref =').slice(0,60);
+    roles.push('- ' + role + ' ' + JSON.stringify(name));
+  }
+  return {text,roles:roles.join('\n').slice(0,2000)};
+})()`
 
 function exactOrigin(value: string): boolean {
   if (value.length > 2048 || !URL.canParse(value)) return false
@@ -145,18 +177,18 @@ export async function readBrowserForeignText(guest: FullPageCaptureGuest, expect
   const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
   const topOrigin = new URL(expectedUrl).origin
   const foreign = guest.mainFrame.framesInSubtree.filter(frame => frame.origin !== topOrigin).slice(0, 8)
-  const frames: { origin: string; text: string }[] = []
+  const frames: { origin: string; text: string; roles: string }[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   const read = async (): Promise<BrowserForeignText> => {
     for (const frame of foreign) {
       if (frame.executeJavaScript === undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
-      const text = await frame.executeJavaScript(
-        '(() => String(document.body?.innerText ?? "").slice(0,1000).replaceAll("[ref=","[ref ="))()')
-      if (typeof text !== 'string' || text.length > 1000 ||
+      const snapshot = await frame.executeJavaScript(FOREIGN_FRAME_SNAPSHOT)
+      if (!record(snapshot) || typeof snapshot.text !== 'string' || snapshot.text.length > 1000 ||
+        typeof snapshot.roles !== 'string' || snapshot.roles.length > 2000 ||
         auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
         throw new Error('SIDEBAR_NAVIGATED')
       }
-      frames.push({ origin: frame.origin, text })
+      frames.push({ origin: frame.origin, text: snapshot.text, roles: snapshot.roles })
     }
     return { fingerprint: before, frames }
   }

@@ -7,7 +7,8 @@ function embeddedPixel(base64) {
   const { width, height } = image.getSize()
   if (width < 160 || height < 90) throw new Error('Capture dimensions are too small for embedded pixels')
   const bitmap = image.toBitmap()
-  const pixel = (80 * width + 150) * 4
+  const scale = width / 400
+  const pixel = (Math.round(80 * scale) * width + Math.round(150 * scale)) * 4
   // Electron bitmap bytes are BGRA; the frame background is #00aa88.
   if (bitmap[pixel] < 80 || bitmap[pixel] > 180 ||
     bitmap[pixel + 1] < 130 || bitmap[pixel + 2] > 60) {
@@ -23,7 +24,7 @@ async function listen(server) {
 async function run() {
   const embedded = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    response.end('<body style="background:#0a8"><button>Embedded</button></body>')
+    response.end('<body style="background:#0a8"><button>Embedded</button><input aria-label="Search" value="PRIVATE_FORM_VALUE"></body>')
   })
   let embeddedOrigin
   const top = createServer((_request, response) => {
@@ -56,7 +57,12 @@ async function run() {
       error => { if (error?.message !== 'SIDEBAR_FRAME_SITE_NOT_APPROVED') throw error })
     const foreignText = await readBrowserForeignText(guest, url, [topOrigin, embeddedOrigin])
     if (foreignText.frames.length !== 1 || foreignText.frames[0].origin !== embeddedOrigin ||
-      foreignText.frames[0].text !== 'Embedded') throw new Error('Approved frame text unavailable')
+      foreignText.frames[0].text !== 'Embedded' ||
+      !foreignText.frames[0].roles.includes('- button "Embedded"') ||
+      !foreignText.frames[0].roles.includes('- textbox "Search"') ||
+      JSON.stringify(foreignText).includes('PRIVATE_FORM_VALUE')) {
+      throw new Error('Approved frame text or roles unavailable')
+    }
     const audit = auditBrowserFrames(guest, url)
     if (JSON.stringify(audit.origins) !== JSON.stringify([topOrigin, embeddedOrigin]) ||
       !/^[a-f0-9]{64}$/.test(audit.fingerprint)) throw new Error('Frame origin audit incomplete')

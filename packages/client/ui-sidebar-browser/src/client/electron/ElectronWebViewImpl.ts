@@ -400,11 +400,13 @@ export class ElectronWebViewImpl implements BrowserFrame {
       element.getURL() !== expectedUrl || this.store.getSnapshot().address !== 'observed' ||
       this.store.getSnapshot().loading || foreign.fingerprint !== before.fingerprint ||
       foreign.frames.length > 8 || foreign.frames.some(frame => !approved.includes(frame.origin) ||
-        frame.origin === new URL(expectedUrl).origin || frame.text.length > 1000) ||
+        frame.origin === new URL(expectedUrl).origin || frame.text.length > 1000 ||
+        typeof frame.roles !== 'string' || frame.roles.length > 2000) ||
       (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
       throw new Error('SIDEBAR_NAVIGATED')
     }
-    const frameText = foreign.frames.map(frame => `[Approved frame ${frame.origin}] ${frame.text}`).join('\n')
+    const frameText = foreign.frames.map(frame =>
+      `[Approved frame ${frame.origin}] ${frame.text}${frame.roles ? `\n[Frame roles]\n${frame.roles}` : ''}`).join('\n')
     return { url: value.url, title: value.title, text: frameText.length === 0 ? value.text
       : `${value.text.slice(0, 31_999 - frameText.length)}\n${frameText}` }
   }

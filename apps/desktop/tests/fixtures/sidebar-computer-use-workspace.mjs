@@ -327,12 +327,12 @@ async function qualify() {
       tab.sessionId === sessionId && tab.observedUrl === crossUrl),
     'cross-origin Sidebar reporter registration', 10000)
     const crossText = await control('/invoke', { sessionId,
-      code: `let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame')) throw Error('FOREIGN_FRAME_TEXT_MISSING'); return 'FOREIGN_TEXT_OK';` })
+      code: `let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame') || !foreignState.includes('[Frame roles]\\n- button "Cross-origin frame"')) throw Error('FOREIGN_FRAME_ROLES_MISSING'); return 'FOREIGN_ROLES_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-text.json'),
       JSON.stringify({ sessionId, tool: crossText }, null, 2))
     assert.equal(crossText.result?.isError, false, JSON.stringify(crossText.result))
     assert.equal(crossText.result?.value?.ok, true, JSON.stringify(crossText.result))
-    assert.match(crossText.result.value.result, /FOREIGN_TEXT_OK/)
+    assert.match(crossText.result.value.result, /FOREIGN_ROLES_OK/)
     const foreignPoint = await window.webContents.executeJavaScript(`
       [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(crossUrl)})
         .executeJavaScript('(() => { const rect = document.getElementById("foreign").getBoundingClientRect(); return [Math.round(rect.left + 65),Math.round(rect.top + 20)]; })()')`)

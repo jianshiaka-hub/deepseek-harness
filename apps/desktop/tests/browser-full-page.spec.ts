@@ -140,21 +140,21 @@ describe('main-owned Sidebar full-page capture', () => {
     expect(h.state.attached).toBe(false)
   })
 
-  it('reads only bounded text from a granted foreign frame and rejects navigation during the read', async () => {
+  it('reads bounded text and roles from a granted foreign frame and rejects navigation during the read', async () => {
     const h = fixture()
     const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
       url: 'https://embedded.test/widget', framesInSubtree: [],
-      executeJavaScript: vi.fn(async () => 'Embedded') }
+      executeJavaScript: vi.fn(async () => ({ text: 'Embedded', roles: '- button "Open"' })) }
     h.frame.framesInSubtree.push(foreign)
     await expect(readBrowserForeignText(h.guest, url, ['https://example.test']))
       .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     await expect(readBrowserForeignText(h.guest, url,
       ['https://example.test', 'https://embedded.test'])).resolves.toMatchObject({
-      frames: [{ origin: 'https://embedded.test', text: 'Embedded' }],
+      frames: [{ origin: 'https://embedded.test', text: 'Embedded', roles: '- button "Open"' }],
     })
     foreign.executeJavaScript.mockImplementationOnce(async () => {
       foreign.url = 'https://embedded.test/next'
-      return 'New content'
+      return { text: 'New content', roles: '- button "Next"' }
     })
     await expect(readBrowserForeignText(h.guest, url,
       ['https://example.test', 'https://embedded.test'])).rejects.toThrow('SIDEBAR_NAVIGATED')

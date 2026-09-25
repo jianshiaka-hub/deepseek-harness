@@ -33,7 +33,7 @@ export interface BrowserFrameAudit {
 /** Bounded visible text from currently approved foreign child frames. */
 export interface BrowserForeignText {
   readonly fingerprint: string
-  readonly frames: readonly { readonly origin: string; readonly text: string }[]
+  readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
 }
 
 /** CSS-pixel rectangle within the selected page's capture extent. */
