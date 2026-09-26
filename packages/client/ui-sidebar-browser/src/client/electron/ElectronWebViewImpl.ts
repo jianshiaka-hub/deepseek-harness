@@ -322,7 +322,8 @@ export class ElectronWebViewImpl implements BrowserFrame {
     }
     // HTML dragging owns the same debugger exclusively for its duration.
     if (action.op === 'drag') return this.action(expectedUrl, action, stillSelected)
-    const token = await this.bridge.beginDialog(lease, expectedUrl)
+    const token = await this.bridge.beginDialog(lease, expectedUrl,
+      action.op === 'navigate' ? undefined : action.approvedFrameOrigins)
     let keep = false
     try {
       if (this.lease !== lease || !this.inputStillSelected(element, expectedUrl, stillSelected)) {

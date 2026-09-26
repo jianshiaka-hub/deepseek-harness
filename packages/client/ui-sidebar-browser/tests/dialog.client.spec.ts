@@ -62,6 +62,20 @@ it('forwards an approved prompt answer to only the retained guest dialog lease',
   } finally { action.mockRestore(); await h.dispose() }
 })
 
+it('forwards exact approved frame origins when a foreign element can open a prompt', async () => {
+  const { h } = await readyFixture()
+  const dialog: BrowserJsDialog = { id: 'aa281017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }
+  const origins = ['https://example.test', 'https://foreign.test']
+  const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise(() => {}))
+  h.bridge.waitDialog.mockResolvedValue(dialog)
+  try {
+    await expect(h.frame.actionWithDialog?.(url,
+      { op: 'click', ref: 'foreign-ref', approvedFrameOrigins: origins }, () => true))
+      .resolves.toMatchObject({ dialog })
+    expect(h.bridge.beginDialog).toHaveBeenCalledWith(h.reservation.lease, url, origins)
+  } finally { action.mockRestore(); await h.dispose() }
+})
+
 it('drops a dialog handle that Chromium already closed before the agent accepts it', async () => {
   const { h } = await readyFixture()
   const dialog: BrowserJsDialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm' }

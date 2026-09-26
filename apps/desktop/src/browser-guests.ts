@@ -191,7 +191,8 @@ export class DesktopBrowserGuests {
   }
 
   /** Watch only this owned guest for an action-triggered JavaScript modal. */
-  async beginDialog(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
+  async beginDialog(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedPromptOrigins?: unknown): Promise<string> {
     if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
       throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
     }
@@ -202,6 +203,13 @@ export class DesktopBrowserGuests {
       guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {
       throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     }
+    if (approvedPromptOrigins !== undefined && (!Array.isArray(approvedPromptOrigins) ||
+      !approvedPromptOrigins.every(origin => typeof origin === 'string'))) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    if (approvedPromptOrigins !== undefined) {
+      auditBrowserFrames(guest, expectedUrl, approvedPromptOrigins)
+    }
     const previous = this.activeDialogs.get(key)
     if (previous !== undefined) {
       try { this.dialogLease.get(previous); throw new Error('SIDEBAR_DIALOG_BUSY') }
@@ -210,7 +218,7 @@ export class DesktopBrowserGuests {
         this.activeDialogs.delete(key)
       }
     }
-    const token = await this.dialogLease.begin(guest, expectedUrl)
+    const token = await this.dialogLease.begin(guest, expectedUrl, approvedPromptOrigins)
     this.activeDialogs.set(key, token)
     return token
   }

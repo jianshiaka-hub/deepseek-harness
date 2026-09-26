@@ -235,7 +235,8 @@ export interface DesktopBrowserBridge {
   finishDrag(lease: DesktopBrowserLeaseId, token: string,
     point?: { readonly x: number; readonly y: number }): Promise<{ readonly dropped: boolean }>
   /** Arm the exact guest before an approved action can open a JavaScript modal. */
-  beginDialog(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
+  beginDialog(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedPromptOrigins?: readonly string[]): Promise<string>
   /** Dispatch one fixed navigation in the owned guest's isolated world after arming its dialog watch. */
   navigate(lease: DesktopBrowserLeaseId, token: string, expectedUrl: string,
     method: 'goto' | 'back' | 'forward', destination?: string): Promise<void>

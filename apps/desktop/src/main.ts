@@ -733,9 +733,10 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.finishDrag(event.sender, lease, token, point)
   })
-  ipcMain.handle(DESKTOP_IPC.browserDialogBegin, (event, lease: unknown, expectedUrl: unknown) => {
+  ipcMain.handle(DESKTOP_IPC.browserDialogBegin, (event, lease: unknown, expectedUrl: unknown,
+    approvedPromptOrigins: unknown) => {
     assertProductSender(event)
-    return browserGuests.beginDialog(event.sender, lease, expectedUrl)
+    return browserGuests.beginDialog(event.sender, lease, expectedUrl, approvedPromptOrigins)
   })
   ipcMain.handle(DESKTOP_IPC.browserNavigate, (event, lease: unknown, token: unknown,
     expectedUrl: unknown, method: unknown, destination: unknown) => {

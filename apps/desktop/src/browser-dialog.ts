@@ -30,6 +30,7 @@ interface ActiveDialogWatch {
   readonly token: string
   readonly guest: DialogGuest
   readonly expectedUrl: string
+  readonly approvedPromptOrigins: ReadonlySet<string>
   readonly onMessage: (_event: unknown, method: string, params: unknown) => void
   readonly onDetach: () => void
   readonly onNavigate: () => void
@@ -82,19 +83,32 @@ export class BrowserDialogLease {
     return active.dialog ?? null
   }
 
-  async begin(guest: DialogGuest, expectedUrl: string): Promise<string> {
+  async begin(guest: DialogGuest, expectedUrl: string,
+    approvedPromptOrigins?: readonly string[]): Promise<string> {
     if (!URL.canParse(expectedUrl) || !['http:', 'https:'].includes(new URL(expectedUrl).protocol) ||
       new URL(expectedUrl).username !== '' || new URL(expectedUrl).password !== '' ||
       guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {
       throw new Error('SIDEBAR_TAB_UNAVAILABLE')
     }
+    const topOrigin = new URL(expectedUrl).origin
+    if (approvedPromptOrigins !== undefined && (!Array.isArray(approvedPromptOrigins) ||
+      approvedPromptOrigins.length < 1 || approvedPromptOrigins.length > 100 ||
+      new Set(approvedPromptOrigins).size !== approvedPromptOrigins.length ||
+      !approvedPromptOrigins.includes(topOrigin) ||
+      !approvedPromptOrigins.every((origin) => {
+        if (typeof origin !== 'string' || !URL.canParse(origin)) return false
+        const parsed = new URL(origin)
+        return ['http:', 'https:'].includes(parsed.protocol) && parsed.origin === origin &&
+          parsed.username === '' && parsed.password === ''
+      }))) throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     if (this.guests.has(guest) || guest.debugger.isAttached()) throw new Error('SIDEBAR_DIALOG_BUSY')
     this.guests.add(guest)
     const token = randomUUID()
     let attached = false
     let invalidated = false
     const active: ActiveDialogWatch = {
-      token, guest, expectedUrl, waiters: new Set(), timer: undefined, dialog: undefined,
+      token, guest, expectedUrl, approvedPromptOrigins: new Set(approvedPromptOrigins ?? [topOrigin]),
+      waiters: new Set(), timer: undefined, dialog: undefined,
       promptReply: undefined,
       framePromptScriptId: undefined,
       closed: false, detached: false,
@@ -195,7 +209,7 @@ export class BrowserDialogLease {
     const active = this.watches.get(token)
     if (active === undefined || active.closed || active.detached || active.dialog !== undefined ||
       !this.validGuest(active) || !URL.canParse(sourceUrl) ||
-      new URL(sourceUrl).origin !== new URL(active.expectedUrl).origin) return false
+      !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
     active.promptReply = respond
     active.dialog = { id: randomUUID(), type: 'prompt' }
     if (active.timer !== undefined) clearTimeout(active.timer)

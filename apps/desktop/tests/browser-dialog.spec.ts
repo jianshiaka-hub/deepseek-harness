@@ -122,6 +122,29 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.state.attached).toBe(false)
   })
 
+  it('binds a foreign prompt only to a current exact-origin grant', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    await expect(lease.begin(h.guest, url, ['https://foreign.test']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    await expect(lease.begin(h.guest, url, ['https://example.test', 'https://foreign.test/path']))
+      .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    const token = await lease.begin(h.guest, url,
+      ['https://example.test', 'https://foreign.test'])
+    const blocked = vi.fn()
+    expect(lease.offerPrompt(token, 'https://unapproved.test/frame', blocked)).toBe(false)
+    expect(blocked).not.toHaveBeenCalled()
+    h.open('confirm', 'https://foreign.test/frame')
+    expect(lease.get(token)).toBeNull()
+    const reply = vi.fn()
+    expect(lease.offerPrompt(token, 'https://foreign.test/frame', reply)).toBe(true)
+    const dialog = lease.get(token)
+    expect(dialog?.type).toBe('prompt')
+    await lease.handle(token, dialog!.id, 'accept', 'approved answer')
+    expect(reply).toHaveBeenCalledExactlyOnceWith('approved answer')
+    expect(h.state.attached).toBe(false)
+  })
+
   it('returns null to a blocked prompt when its lease closes or it is dismissed', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()
