@@ -434,8 +434,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
     const navigation = active.info.type === 'beforeunload' && action === 'accept'
       ? this.observeDialogNavigation(element, stillSelected) : undefined
     active.handling = true
-    try { await this.bridge.handleDialog(active.lease, active.token, dialogId, action, text) }
+    let replayed: true | void
+    try { replayed = await this.bridge.handleDialog(active.lease, active.token, dialogId, action, text) }
     catch (error) { navigation?.dispose(); await this.cancelDialog(); throw error }
+    if (replayed === true) navigation?.dispose()
     this.clearDialogState(active)
     if (active.info.type === 'beforeunload' && action === 'dismiss') {
       // The navigation was cancelled by the page modal; stop its pending wait.
@@ -446,11 +448,26 @@ export class ElectronWebViewImpl implements BrowserFrame {
     // destination only after the native action settles or fail explicitly.
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await Promise.race([active.action, new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => { reject(new Error('SIDEBAR_ACTION_TIMEOUT')) }, 10_000)
-      })])
-      await navigation?.settled
+      if (replayed !== true) {
+        await Promise.race([active.action, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => { reject(new Error('SIDEBAR_ACTION_TIMEOUT')) }, 10_000)
+        })])
+        await navigation?.settled
+      }
     } finally { clearTimeout(timer); navigation?.dispose() }
+    if (replayed === true && action === 'accept') {
+      const deadline = Date.now() + 10_000
+      while (true) {
+        if (this.element !== element || this.lifetime.signal.aborted || !stillSelected()) {
+          throw new Error('SIDEBAR_SELECTION_CHANGED')
+        }
+        const state = this.store.getSnapshot()
+        if (state.address === 'observed' && !state.loading && !element.isLoading() &&
+          state.target?.url === element.getURL()) break
+        if (Date.now() >= deadline) throw new Error('SIDEBAR_NAVIGATION_TIMEOUT')
+        await new Promise((resolve) => { setTimeout(resolve, 50) })
+      }
+    }
     if (this.element !== element || this.lifetime.signal.aborted || !stillSelected()) {
       throw new Error('SIDEBAR_SELECTION_CHANGED')
     }

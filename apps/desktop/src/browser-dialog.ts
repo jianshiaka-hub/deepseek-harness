@@ -45,6 +45,18 @@ interface ActiveDialogWatch {
   guestDialogReply: ((value: boolean | undefined) => void) | undefined
   nativeDialogReply: NativeDialogResponse | undefined
   framePromptScriptId: string | undefined
+  readonly frameDocuments: ReadonlyMap<string, { readonly url: string; readonly loaderId: string }>
+  navigationIntent: { readonly frameId: string; readonly url: string; readonly at: number } | undefined
+  openedBeforeUnload: { readonly frameId: string; readonly sourceUrl: string } | undefined
+  replay: { readonly frameId: string; readonly sourceUrl: string; readonly url: string } | undefined
+  retry: {
+    readonly frameId: string
+    readonly sourceUrl: string
+    readonly url: string
+    readonly resolve: () => void
+    readonly reject: (error: Error) => void
+    open: boolean
+  } | undefined
   closed: boolean
   detached: boolean
 }
@@ -70,6 +82,22 @@ function sameOriginFramePromptScript(expectedUrl: string): string {
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function frameDocuments(value: unknown): Map<string, { readonly url: string; readonly loaderId: string }> {
+  const result = new Map<string, { readonly url: string; readonly loaderId: string }>()
+  if (!record(value) || !record(value.frameTree)) return result
+  const visit = (node: unknown): void => {
+    if (!record(node) || !record(node.frame)) return
+    const frame = node.frame
+    if (typeof frame.id === 'string' && typeof frame.url === 'string' &&
+      typeof frame.loaderId === 'string') {
+      result.set(frame.id, { url: frame.url, loaderId: frame.loaderId })
+    }
+    if (Array.isArray(node.childFrames)) for (const child of node.childFrames) visit(child)
+  }
+  visit(value.frameTree)
+  return result
 }
 
 function dialogType(value: unknown): value is DialogType {
@@ -157,15 +185,46 @@ export class BrowserDialogLease {
     const token = randomUUID()
     let attached = false
     let invalidated = false
+    const initialFrames = new Map<string, { readonly url: string; readonly loaderId: string }>()
     const active: ActiveDialogWatch = {
       token, guest, expectedUrl, approvedPromptOrigins: new Set(approvedPromptOrigins ?? [topOrigin]),
       waiters: new Set(), timer: undefined, dialog: undefined,
       promptReply: undefined, guestDialogReply: undefined,
       nativeDialogReply: undefined,
       framePromptScriptId: undefined,
+      frameDocuments: initialFrames, navigationIntent: undefined,
+      openedBeforeUnload: undefined, replay: undefined, retry: undefined,
       closed: false, detached: false,
       onMessage: (_event, method, params): void => {
+        if (method === 'Page.frameRequestedNavigation' && record(params) &&
+          params.disposition === 'currentTab' && params.reason === 'scriptInitiated' &&
+          typeof params.frameId === 'string' && typeof params.url === 'string' &&
+          params.frameId.length <= 128 && params.url.length <= 16_384 && URL.canParse(params.url)) {
+          const document = initialFrames.get(params.frameId)
+          const destination = new URL(params.url)
+          if (document !== undefined && URL.canParse(document.url) &&
+            ['http:', 'https:'].includes(destination.protocol) &&
+            destination.username === '' && destination.password === '' &&
+            destination.origin === new URL(document.url).origin &&
+            active.approvedPromptOrigins.has(destination.origin)) {
+            active.navigationIntent = { frameId: params.frameId, url: destination.href, at: Date.now() }
+          }
+          return
+        }
+        if (method === 'Page.frameNavigated' && active.retry !== undefined &&
+          record(params) && record(params.frame) &&
+          params.frame.id === active.retry.frameId && params.frame.url === active.retry.url) {
+          active.retry.resolve()
+          return
+        }
         if (method === 'Page.javascriptDialogClosed') {
+          if (active.retry !== undefined) {
+            if (record(params) && params.frameId === active.retry.frameId && params.result === false) {
+              active.retry.reject(new Error('SIDEBAR_NAVIGATION_FAILED'))
+            }
+            active.retry.open = false
+            return
+          }
           // Chromium can cancel a modal independently of the agent (notably in
           // child frames). Never leave its opaque handle actionable afterward.
           if (active.nativeDialogReply !== undefined) {
@@ -174,6 +233,15 @@ export class BrowserDialogLease {
           }
           if (active.dialog !== undefined && active.promptReply === undefined &&
             active.guestDialogReply === undefined) {
+            const opened = active.openedBeforeUnload
+            const intent = active.navigationIntent
+            if (active.dialog.type === 'beforeunload' && record(params) && params.result === false &&
+              opened !== undefined && params.frameId === opened.frameId &&
+              intent?.frameId === opened.frameId && Date.now() - intent.at < 5000 &&
+              initialFrames.get(opened.frameId)?.url === opened.sourceUrl) {
+              active.replay = { frameId: opened.frameId, sourceUrl: opened.sourceUrl, url: intent.url }
+              return
+            }
             active.dialog = undefined
             if (active.timer !== undefined) clearTimeout(active.timer)
             active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, EMPTY_WATCH_MS)
@@ -181,6 +249,17 @@ export class BrowserDialogLease {
           return
         }
         if (method !== 'Page.javascriptDialogOpening' || !record(params)) return
+        if (active.retry !== undefined) {
+          if (params.type === 'beforeunload' && params.frameId === active.retry.frameId &&
+            params.url === active.retry.sourceUrl && this.validGuest(active, true)) {
+            active.retry.open = true
+            void guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: true }).catch(() => {})
+          } else {
+            active.retry.reject(new Error('SIDEBAR_NAVIGATION_FAILED'))
+            void guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
+          }
+          return
+        }
         if (this.nativeGuards.has(guest) && params.type !== 'beforeunload') return
         // CDP is reserved for beforeunload when the native guard is installed.
         // A foreign frame may hold it only if the current action preapproved
@@ -193,6 +272,9 @@ export class BrowserDialogLease {
           void guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
           return
         }
+        active.openedBeforeUnload = params.type === 'beforeunload' &&
+          typeof params.frameId === 'string' && typeof source === 'string'
+          ? { frameId: params.frameId, sourceUrl: source } : undefined
         active.dialog = { id: randomUUID(), type: params.type }
         if (active.timer !== undefined) clearTimeout(active.timer)
         // An abandoned agent turn must not leave a user-owned tab modal forever.
@@ -212,6 +294,9 @@ export class BrowserDialogLease {
       guest.on('did-navigate', active.onNavigate)
       guest.on('destroyed', active.onDestroyed)
       await guest.debugger.sendCommand('Page.enable')
+      this.assertValidStart(active, invalidated)
+      const tree = await guest.debugger.sendCommand('Page.getFrameTree').catch(() => null)
+      for (const [id, document] of frameDocuments(tree)) initialFrames.set(id, document)
       this.assertValidStart(active, invalidated)
       const injected = await guest.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
         source: sameOriginFramePromptScript(expectedUrl), runImmediately: true,
@@ -312,12 +397,48 @@ export class BrowserDialogLease {
     return true
   }
 
-  async handle(token: string, id: string, action: 'accept' | 'dismiss', text?: string): Promise<void> {
+  async handle(token: string, id: string, action: 'accept' | 'dismiss', text?: string): Promise<true | void> {
     const active = this.watches.get(token)
     if (active === undefined || active.closed || active.detached || !this.validGuest(active) ||
       active.dialog?.id !== id || !['accept', 'dismiss'].includes(action) ||
       text !== undefined && (active.dialog.type !== 'prompt' || text.length > 4000)) {
       throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    }
+    if (active.replay !== undefined) {
+      const replay = active.replay
+      active.replay = undefined
+      if (action === 'dismiss') {
+        active.dialog = undefined
+        await this.close(token)
+        return true
+      }
+      const tree = frameDocuments(await active.guest.debugger.sendCommand('Page.getFrameTree'))
+      const original = active.frameDocuments.get(replay.frameId)
+      const current = tree.get(replay.frameId)
+      if (original === undefined || current === undefined ||
+        original.url !== replay.sourceUrl || current.url !== original.url ||
+        current.loaderId !== original.loaderId || !this.validGuest(active)) {
+        await this.close(token)
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const committed = new Promise<void>((resolve, reject) => {
+        active.retry = { ...replay, resolve, reject, open: false }
+        timer = setTimeout(() => { reject(new Error('SIDEBAR_NAVIGATION_TIMEOUT')) }, 12_000)
+      })
+      active.dialog = undefined
+      try {
+        void active.guest.debugger.sendCommand('Page.navigate', {
+          frameId: replay.frameId, url: replay.url,
+        }).catch((error: unknown) => {
+          active.retry?.reject(error instanceof Error ? error : new Error(String(error)))
+        })
+        await committed
+        return true
+      } finally {
+        clearTimeout(timer)
+        await this.close(token)
+      }
     }
     if (active.nativeDialogReply !== undefined) {
       const reply = active.nativeDialogReply
@@ -355,6 +476,9 @@ export class BrowserDialogLease {
     const active = this.watches.get(token)
     if (active === undefined || active.closed) return
     active.closed = true
+    const retry = active.retry
+    active.retry = undefined
+    retry?.reject(new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE'))
     this.watches.delete(token)
     this.guests.delete(active.guest)
     if (active.timer !== undefined) clearTimeout(active.timer)
@@ -387,7 +511,7 @@ export class BrowserDialogLease {
     }
     if (!active.detached && active.guest.debugger.isAttached()) {
       try {
-        if (active.dialog !== undefined) {
+        if (active.dialog !== undefined || retry?.open === true) {
           await active.guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
         }
         if (active.framePromptScriptId !== undefined) {

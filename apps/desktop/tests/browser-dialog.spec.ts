@@ -304,6 +304,108 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.state.attached).toBe(false)
   })
 
+  it('replays only an approved same-document foreign navigation after one-use beforeunload acceptance', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const source = 'https://foreign.test/frame'
+    const destination = 'https://foreign.test/next'
+    const frameId = 'foreign-frame'
+    const tree = () => ({ frameTree: { frame: { id: 'top', url, loaderId: 'top-loader' },
+      childFrames: [{ frame: { id: frameId, url: source, loaderId: 'foreign-loader' } }] } })
+    h.sendCommand.mockImplementation(async (method: string, params?: object): Promise<object> => {
+      if (method === 'Page.getFrameTree') return tree()
+      if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'frame-prompt-script' }
+      if (method === 'Page.navigate') {
+        queueMicrotask(() => { h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+          { type: 'beforeunload', url: source, frameId }) })
+        return { frameId }
+      }
+      if (method === 'Page.handleJavaScriptDialog' && (params as { accept?: boolean })?.accept) {
+        queueMicrotask(() => {
+          h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { frameId, result: true })
+          h.debuggerPort.emit('message', undefined, 'Page.frameNavigated',
+            { frame: { id: frameId, url: destination } })
+        })
+      }
+      return {}
+    })
+    const offer = async (): Promise<{ token: string; id: string }> => {
+      const token = await lease.begin(h.guest, url,
+        ['https://example.test', 'https://foreign.test'])
+      h.debuggerPort.emit('message', undefined, 'Page.frameRequestedNavigation',
+        { disposition: 'currentTab', reason: 'scriptInitiated', frameId, url: destination })
+      h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+        { type: 'beforeunload', url: source, frameId })
+      const dialog = lease.get(token)!
+      h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { frameId, result: false })
+      expect(lease.get(token)).toEqual(dialog)
+      return { token, id: dialog.id }
+    }
+    const dismissed = await offer()
+    await expect(lease.handle(dismissed.token, dismissed.id, 'dismiss')).resolves.toBe(true)
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Page.navigate', expect.anything())
+    const accepted = await offer()
+    await expect(lease.handle(accepted.token, accepted.id, 'accept')).resolves.toBe(true)
+    expect(h.sendCommand).toHaveBeenCalledWith('Page.navigate', { frameId, url: destination })
+    expect(h.sendCommand).toHaveBeenCalledWith('Page.handleJavaScriptDialog', { accept: true })
+    expect(h.state.attached).toBe(false)
+  })
+
+  it('rejects a replay when its original foreign document has changed', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const source = 'https://foreign.test/frame'
+    const frameId = 'foreign-frame'
+    let loaderId = 'original-loader'
+    h.sendCommand.mockImplementation(async (method: string): Promise<object> => {
+      if (method === 'Page.getFrameTree') return { frameTree: {
+        frame: { id: 'top', url, loaderId: 'top-loader' },
+        childFrames: [{ frame: { id: frameId, url: source, loaderId } }],
+      } }
+      return method === 'Page.addScriptToEvaluateOnNewDocument'
+        ? { identifier: 'frame-prompt-script' } : {}
+    })
+    const token = await lease.begin(h.guest, url,
+      ['https://example.test', 'https://foreign.test'])
+    h.debuggerPort.emit('message', undefined, 'Page.frameRequestedNavigation',
+      { disposition: 'currentTab', reason: 'scriptInitiated', frameId,
+        url: 'https://foreign.test/next' })
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+      { type: 'beforeunload', url: source, frameId })
+    const dialog = lease.get(token)!
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { frameId, result: false })
+    loaderId = 'replacement-loader'
+    await expect(lease.handle(token, dialog.id, 'accept')).rejects.toThrow('SIDEBAR_NAVIGATED')
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Page.navigate', expect.anything())
+  })
+
+  it('does not replay an iframe unload toward another origin even when that origin is approved', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const source = 'https://foreign.test/frame'
+    const frameId = 'foreign-frame'
+    h.sendCommand.mockImplementation(async (method: string): Promise<object> =>
+      method === 'Page.getFrameTree' ? { frameTree: {
+        frame: { id: 'top', url, loaderId: 'top-loader' },
+        childFrames: [{ frame: { id: frameId, url: source, loaderId: 'foreign-loader' } }],
+      } } : method === 'Page.addScriptToEvaluateOnNewDocument'
+        ? { identifier: 'frame-prompt-script' } : {})
+    const token = await lease.begin(h.guest, url,
+      ['https://example.test', 'https://foreign.test', 'https://other.test'])
+    h.debuggerPort.emit('message', undefined, 'Page.frameRequestedNavigation',
+      { disposition: 'currentTab', reason: 'scriptInitiated', frameId,
+        url: 'https://other.test/next' })
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+      { type: 'beforeunload', url: source, frameId })
+    const dialog = lease.get(token)!
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { frameId, result: false })
+    expect(lease.get(token)).toBeNull()
+    await expect(lease.handle(token, dialog.id, 'accept'))
+      .rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    await lease.close(token)
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Page.navigate', expect.anything())
+  })
+
   it('returns null to a blocked prompt when its lease closes or it is dismissed', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()

@@ -867,9 +867,11 @@ async function qualify() {
     const foreignLeaveEvents = []
     const foreignLeaveStart = Date.now()
     const onForeignLeaveDebugger = (_event, method, params) => {
-      if (method === 'Page.javascriptDialogOpening' || method === 'Page.javascriptDialogClosed') {
+      if (method === 'Page.javascriptDialogOpening' || method === 'Page.javascriptDialogClosed' ||
+        method === 'Page.frameRequestedNavigation') {
         foreignLeaveEvents.push({ ms: Date.now() - foreignLeaveStart,
-          method, type: params?.type, url: params?.url, result: params?.result })
+          method, type: params?.type, url: params?.url, result: params?.result,
+          frameId: params?.frameId, reason: params?.reason, disposition: params?.disposition })
       }
     }
     const onForeignLeaveNative = raw => {
@@ -882,24 +884,28 @@ async function qualify() {
     foreignGuest.debugger.on('message', onForeignLeaveDebugger)
     foreignGuest.on('-run-dialog', onForeignLeaveNative)
     foreignGuest.on('will-prevent-unload', onForeignLeavePrevent)
-    const foreignLeaveClosed = await control('/invoke', { sessionId,
-      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign leave',exact:true}).click(); if(await t.getJsDialog()) throw Error('CHROMIUM_CLOSED_DIALOG_EXPOSED'); return 'FOREIGN_BEFOREUNLOAD_CLOSED';` })
+    const foreignLeaveDismissed = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign leave',exact:true}).click(); let leaveDismiss = await t.getJsDialog(); if(leaveDismiss?.type !== 'beforeunload') throw Error('FOREIGN_BEFOREUNLOAD_MISSING'); await leaveDismiss.dismiss(); return 'FOREIGN_BEFOREUNLOAD_DISMISSED';` })
+    assert.equal(foreignLeaveDismissed.result?.value?.ok, true, JSON.stringify(foreignLeaveDismissed.result))
+    assert.match(foreignLeaveDismissed.result.value.result, /FOREIGN_BEFOREUNLOAD_DISMISSED/)
+    assert.equal(foreignFrame.url.endsWith('/frame'), true, 'dismissed dialog must keep the foreign frame')
+    assert.equal(foreignLeaveDismissed.approvals.filter(approval => approval.allowed).length,
+      crossHover.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign click and dialog dismissal each need one-use confirmation')
+    const foreignLeaveAccepted = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign leave',exact:true}).click(); let leaveAccept = await t.getJsDialog(); if(leaveAccept?.type !== 'beforeunload') throw Error('FOREIGN_BEFOREUNLOAD_MISSING'); await leaveAccept.accept(); return 'FOREIGN_BEFOREUNLOAD_ACCEPTED';` })
     foreignGuest.debugger.off('message', onForeignLeaveDebugger)
     foreignGuest.off('-run-dialog', onForeignLeaveNative)
     foreignGuest.off('will-prevent-unload', onForeignLeavePrevent)
-    assert.equal(foreignLeaveClosed.result?.value?.ok, true, JSON.stringify(foreignLeaveClosed.result))
-    assert.match(foreignLeaveClosed.result.value.result, /FOREIGN_BEFOREUNLOAD_CLOSED/)
-    assert.equal(foreignLeaveClosed.approvals.filter(approval => approval.allowed).length,
-      crossHover.approvals.filter(approval => approval.allowed).length + 1,
-      'Foreign click needs one-use confirmation; Chromium-closed dialog must not be offered')
-    assert.equal(foreignFrame.url.endsWith('/frame'), true, 'closed dialog must keep the foreign frame')
-    assert.equal(await foreignFrame.executeJavaScript('document.body.dataset.foreignLeaveActivated'), 'true')
-    await foreignFrame.executeJavaScript(`(() => {
-      removeEventListener('beforeunload', window.__foreignLeaveHandler);
-      document.querySelector('button')?.remove();
-    })()`)
+    assert.equal(foreignLeaveAccepted.result?.value?.ok, true, JSON.stringify(foreignLeaveAccepted.result))
+    assert.match(foreignLeaveAccepted.result.value.result, /FOREIGN_BEFOREUNLOAD_ACCEPTED/)
+    assert.equal(foreignLeaveAccepted.approvals.filter(approval => approval.allowed).length,
+      foreignLeaveDismissed.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign click and dialog acceptance each need one-use confirmation')
+    assert.equal(foreignFrame.url.endsWith('/next'), true, 'accepted dialog must navigate the same foreign frame')
     await writeFile(join(root, 'computer-use-cross-origin-beforeunload.json'),
-      JSON.stringify({ sessionId, tool: foreignLeaveClosed, foreignLeaveEvents,
+      JSON.stringify({ sessionId, dismissed: foreignLeaveDismissed, accepted: foreignLeaveAccepted,
+        foreignLeaveEvents,
         actionFinishedMs: Date.now() - foreignLeaveStart,
         guestPreferences: foreignGuest.getLastWebPreferences(),
         activated: true, frameUrl: foreignFrame.url }, null, 2))
@@ -912,7 +918,7 @@ async function qualify() {
     assert.equal(created.result?.value?.ok, true, JSON.stringify(created.result))
     assert.match(created.result.value.result, /CREATED_sidebar:.*_true/)
     assert.equal(created.approvals.filter(approval => approval.allowed).length,
-      foreignLeaveClosed.approvals.filter(approval => approval.allowed).length,
+      foreignLeaveAccepted.approvals.filter(approval => approval.allowed).length,
       'same-origin tab creation and read need no action confirmation')
     const blankCreated = await control('/invoke', { sessionId,
       code: `let blankTab = await b.tabs.new(); if (await blankTab.url() !== 'about:blank') throw Error('BLANK_URL_MISSING'); if ((await blankTab.getAXState({emit:false})) !== '') throw Error('BLANK_NOT_EMPTY'); let selectedBlank = await b.tabs.selected(); if (selectedBlank?.id !== blankTab.id) throw Error('BLANK_NOT_SELECTED'); return 'BLANK_' + blankTab.id;` })

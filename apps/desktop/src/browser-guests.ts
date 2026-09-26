@@ -311,13 +311,14 @@ export class DesktopBrowserGuests {
 
   /** Resolve one matching handle; a stale handle cannot control a newer dialog. */
   async handleDialog(owner: WebContents, id: unknown, token: unknown, dialogId: unknown,
-    action: unknown, text: unknown): Promise<void> {
+    action: unknown, text: unknown): Promise<true | void> {
     const key = this.dialogToken(owner, id, token)
     if (typeof dialogId !== 'string' || !['accept', 'dismiss'].includes(action as string) ||
       text !== undefined && typeof text !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
-    await this.dialogLease.handle(token as string, dialogId, action as 'accept' | 'dismiss', text)
+    const replayed = await this.dialogLease.handle(token as string, dialogId, action as 'accept' | 'dismiss', text)
     this.activeDialogs.delete(key)
     this.activeNavigations.delete(token as string)
+    return replayed
   }
 
   /** Abandon a watch and dismiss any open modal so the guest is not left blocked. */

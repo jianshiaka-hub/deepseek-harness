@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-26-sidebar-beforeunload-replay.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-26-sidebar-beforeunload-replay.md
+/agent-note-selected-sidebar-subframe-unload-replay:
+  en: 0e0144daf8547821
+  zh: 4b64d9f1e612c998
+/agent-note-selected-sidebar-subframe-unload-replay/problem:
+  en: 08d0b58497bc21bd
+  zh: e97e19be85af7844
+/agent-note-selected-sidebar-subframe-unload-replay/decision:
+  en: 49a20f8f502eca36
+  zh: 3e3a776dd7d623ce
+/agent-note-selected-sidebar-subframe-unload-replay/alternatives-considered:
+  en: 11504a1d05239eec
+  zh: 2e90c240014ea6c7
+/agent-note-selected-sidebar-subframe-unload-replay/consequences:
+  en: 1d9d3ba82dfbc440
+  zh: ccbccc3897f0ab31

@@ -79,11 +79,19 @@ async function run() {
       throw new Error('Electron native dialog guard did not install')
     }
     const events = []
+    let requestedNavigation
     guest.on('will-prevent-unload', () => events.push('will-prevent-unload'))
+    guest.on('will-frame-navigate', details => {
+      events.push('will-frame-navigate:' + JSON.stringify({ url: details.url, frame: details.frame?.url, isMainFrame: details.isMainFrame }))
+    })
     guest.on('-run-dialog', raw => events.push('-run-dialog:' + raw?.dialogType))
     guest.debugger.on('message', (_event, method, params) => {
-      if (method === 'Page.javascriptDialogOpening' || method === 'Page.javascriptDialogClosed') {
-        events.push(method + ':' + (params?.type ?? params?.result))
+      if (method === 'Page.javascriptDialogOpening' || method === 'Page.javascriptDialogClosed' ||
+        method === 'Page.frameRequestedNavigation' || method === 'Page.frameNavigated') {
+        events.push(method + ':' + JSON.stringify(params))
+        if (method === 'Page.frameRequestedNavigation' && params?.url?.endsWith('/next')) {
+          requestedNavigation = { frameId: params.frameId, url: params.url, reason: params.reason }
+        }
       }
     })
     const denied = await dialogs.begin(guest, topUrl)
@@ -97,6 +105,37 @@ async function run() {
     if (await dialogs.wait(denied, 250) !== null) throw new Error('Unapproved foreign beforeunload was offered')
     if (child.url !== childUrl) throw new Error('Unapproved foreign beforeunload did not cancel navigation')
     await dialogs.close(denied)
+
+    if (process.env.SIDEBAR_FOREIGN_REPLAY_PROBE === '1') {
+      if (requestedNavigation?.reason !== 'scriptInitiated' ||
+        requestedNavigation.url !== new URL('/next', childUrl).href) {
+        throw new Error(`Foreign navigation request unavailable: ${JSON.stringify(requestedNavigation)}`)
+      }
+      const replay = await dialogs.begin(guest, topUrl,
+        [new URL(topUrl).origin, new URL(childUrl).origin])
+      try {
+        events.push('Page.getFrameTree:' + JSON.stringify(await guest.debugger.sendCommand('Page.getFrameTree')))
+        const navigating = guest.debugger.sendCommand('Page.navigate', {
+          frameId: requestedNavigation.frameId, url: requestedNavigation.url,
+        })
+        const retryDialog = await dialogs.wait(replay, 3000)
+        if (retryDialog?.type !== 'beforeunload') {
+          throw new Error(`Replay dialog unavailable: ${JSON.stringify(retryDialog)}`)
+        }
+        try { await guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: true }) }
+        catch (error) { events.push('replay-handle-error:' + String(error)) }
+        const result = await navigating.catch(error => ({ error: String(error) }))
+        events.push('Page.navigate:' + JSON.stringify(result))
+        for (let attempt = 0; attempt < 60 && child.url === childUrl; attempt++) await sleep(50)
+        if (child.url === childUrl) {
+          throw new Error(`Replay did not navigate: ${JSON.stringify({ childUrl: child.url, result })}`)
+        }
+      } finally {
+        await dialogs.close(replay)
+      }
+      process.stdout.write(`Electron foreign beforeunload replay probe PASS: events=${JSON.stringify(events)}\n`)
+      return
+    }
 
     const approved = await dialogs.begin(guest, topUrl,
       [new URL(topUrl).origin, new URL(childUrl).origin])

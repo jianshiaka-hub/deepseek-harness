@@ -36,9 +36,10 @@ export interface BrowserForeignText {
   readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
 }
 
-/** One bounded selector and optional local filter over the approved document. */
+/** A bounded string or serialized regular expression for approved locator matching. */
 export type BrowserTextPattern = string | { readonly __cu: 'regexp'; readonly source: string; readonly flags: string }
 
+/** One bounded selector and optional local filter over the approved document. */
 export interface BrowserLocateSelector {
   readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
   readonly value: BrowserTextPattern
@@ -260,7 +261,7 @@ export interface DesktopBrowserBridge {
   waitDialog(lease: DesktopBrowserLeaseId, token: string, timeoutMs?: number): Promise<BrowserJsDialog | null>
   /** Confirm or dismiss one matching modal. */
   handleDialog(lease: DesktopBrowserLeaseId, token: string, dialogId: string,
-    action: 'accept' | 'dismiss', text?: string): Promise<void>
+    action: 'accept' | 'dismiss', text?: string): Promise<true | void>
   /** Disarm and dismiss a still-open modal when the action or selection ends. */
   finishDialog(lease: DesktopBrowserLeaseId, token: string): Promise<void>
   /** @param lease - originating guest. @param listener - approved URL consumer. @returns unsubscribe callback. */
