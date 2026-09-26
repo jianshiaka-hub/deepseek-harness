@@ -87,6 +87,41 @@ export function apply(ctx: Context): void {
         ...(state?.target !== undefined ? { requestedUrl: state.target.url, title: state.target.title } : {}) }
     },
     (tab, command, stillSelected) => {
+      if (command.op === 'create') {
+        const destination = command.args.url
+        if (destination === undefined || !stillSelected()) throw new Error('SIDEBAR_TAB_CREATION_UNAVAILABLE')
+        const parsed = new URL(destination)
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.href !== destination ||
+          parsed.username || parsed.password) throw new Error('SIDEBAR_URL_UNAVAILABLE')
+        const before = new Set(openTabs.getSnapshot().filter(current =>
+          current.sessionId === tab.sessionId).map(current => current.tabId))
+        ctx.sidebarRight.openTab('browser', { params: { url: destination }, revealIfOpened: false })
+        const added = openTabs.getSnapshot().filter(current =>
+          current.sessionId === tab.sessionId && current.kind === 'browser' && !before.has(current.tabId))
+        const created = added[0]
+        if (added.length !== 1 || created === undefined) throw new Error('SIDEBAR_TAB_CREATION_AMBIGUOUS')
+        const createdTabId = created.tabId
+        return (async () => {
+          const deadline = Date.now() + 12_000
+          while (Date.now() < deadline) {
+            const selected = ctx.sidebarRight.selected.getSnapshot()
+            if (selected !== undefined && (selected.sessionId !== tab.sessionId ||
+              selected.tabId !== tab.tabId && selected.tabId !== createdTabId)) {
+              throw new Error('SIDEBAR_SELECTION_CHANGED')
+            }
+            if (selected?.sessionId === tab.sessionId && selected.tabId === createdTabId) {
+              const frame = controllers.get(tab.sessionId as BrowserBodyProps['sessionId'])
+                ?.snapshot(createdTabId)?.frame
+              if (frame?.address === 'observed' && !frame.loading && frame.target !== undefined) {
+                return { url: frame.target.url, title: frame.target.title.slice(0, 512),
+                  tabId: createdTabId, created: true as const }
+              }
+            }
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          throw new Error('SIDEBAR_TAB_CREATION_TIMEOUT')
+        })()
+      }
       const controller = controllers.get(tab.sessionId as BrowserBodyProps['sessionId'])
       if (controller === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
       const tabId = tab.tabId as Parameters<BrowserInjected['inspect']>[0]

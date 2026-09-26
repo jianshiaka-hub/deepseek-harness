@@ -583,6 +583,17 @@ async function qualify() {
     await writeFile(join(root, 'computer-use-cross-origin-scroll.json'),
       JSON.stringify({ sessionId, tool: crossScroll, foreignScrollBefore, foreignScrollAfter,
         topScrollBefore, topScrollAfter }, null, 2))
+    const createdUrl = new URL('/created', pageUrl).href
+    const created = await control('/invoke', { sessionId,
+      code: `let createdTab = await b.tabs.new(${JSON.stringify(createdUrl)}); let activeTab = await b.tabs.selected(); if (activeTab?.id !== createdTab.id) throw Error('CREATED_TAB_NOT_SELECTED'); let oldUnavailable = false; try { await t.getAXState({emit:false}); } catch { oldUnavailable = true; } if (!oldUnavailable) throw Error('OLD_TAB_STILL_EXPOSED'); return 'CREATED_' + createdTab.id + '_' + (await createdTab.getAXState({emit:false})).includes('Isolated Computer Use');` })
+    await writeFile(join(root, 'computer-use-create-tab.json'),
+      JSON.stringify({ sessionId, tool: created, createdUrl }, null, 2))
+    assert.equal(created.result?.isError, false, JSON.stringify(created.result))
+    assert.equal(created.result?.value?.ok, true, JSON.stringify(created.result))
+    assert.match(created.result.value.result, /CREATED_sidebar:.*_true/)
+    assert.equal(created.approvals.filter(approval => approval.allowed).length,
+      crossScroll.approvals.filter(approval => approval.allowed).length,
+      'same-origin tab creation and read need no action confirmation')
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {

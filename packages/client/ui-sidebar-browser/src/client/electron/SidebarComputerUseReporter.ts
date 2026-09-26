@@ -27,6 +27,8 @@ interface SidebarResult {
   readonly clipboardSuperseded?: boolean
   readonly dropDispatched?: boolean
   readonly closed?: true
+  readonly created?: true
+  readonly tabId?: string
   readonly dialog?: BrowserJsDialog | null
 }
 
@@ -40,7 +42,7 @@ interface Command {
   readonly id: string
   readonly sessionId: string
   readonly tabId: string
-  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'dialog' | 'dialogAction'
+  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'create' | 'dialog' | 'dialogAction'
   readonly expectedUrl: string
   readonly args: {
     readonly approvedOrigin: string
@@ -138,6 +140,10 @@ export class SidebarComputerUseReporter {
         const after = this.selected()
         if (command.op === 'close') {
           ok = value.closed === true && !this.sameIdentity(command, after)
+        } else if (command.op === 'create') {
+          ok = after !== null && after.sessionId === command.sessionId &&
+            after.tabId !== command.tabId && after.tabId === value.tabId &&
+            after.controllerAvailable && after.observedUrl === value.url && value.created === true
         } else if (['goto', 'back', 'forward', 'dialogAction'].includes(command.op)) {
           ok = this.selectionRevision === selectionRevision && this.sameIdentity(command, after) &&
             after.controllerAvailable && after.observedUrl === value.url && value.performed === true
