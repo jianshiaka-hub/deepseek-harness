@@ -3,6 +3,7 @@ import { runInNewContext } from 'node:vm'
 /** The selected desktop guest executes only pinned, fixed inspection and DOM actions. */
 import { expect, it, vi } from 'vitest'
 import { electronFixture } from './electron-harness.client.ts'
+import type { BrowserTextPattern } from '../src/types.ts'
 
 function runGuestScript(code: string, context: Record<string, unknown>): unknown {
   const result: unknown = runInNewContext(code, context)
@@ -100,6 +101,227 @@ it('reads a bounded nullable attribute from the selected document', async () => 
     await expect(h.frame.locate?.(url, { ...query, attributeName: 'data-large' }))
       .rejects.toThrow('SIDEBAR_ATTRIBUTE_TOO_LARGE')
     await expect(h.frame.locate?.(url, { ...query, attributeName: 'bad name' }))
+      .rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
+it('matches button and submit input labels as text without reading editable input values', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<input type="button" value="Save changes"><input type="submit" value="Send form">' +
+    '<input type="text" value="Private draft"><input type="password" value="Private password">'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const query = (value: string) => ({ method: 'getByText' as const, value, exact: false })
+    expect((await h.frame.locate?.(url, query('save CHANGES')))?.count).toBe(1)
+    expect((await h.frame.locate?.(url, query('Send form')))?.count).toBe(1)
+    expect((await h.frame.locate?.(url, query('Private draft')))?.count).toBe(0)
+    expect((await h.frame.locate?.(url, query('Private password')))?.count).toBe(0)
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
+it('excludes ARIA-hidden roles by default and includes them only when requested', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<button aria-label="Visible action">Go</button>' +
+    '<div aria-hidden="true"><button aria-label="ARIA hidden">Go</button></div>' +
+    '<div style="display:none"><button aria-label="Display hidden">Go</button></div>' +
+    '<button hidden aria-label="HTML hidden">Go</button>' +
+    '<div inert><button aria-label="Inert hidden">Go</button></div>' +
+    '<button style="visibility:hidden" aria-label="Visibility hidden">Go</button>' +
+    '<div style="visibility:hidden"><button style="visibility:visible" aria-label="Visible override">Go</button></div>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const role = { method: 'getByRole' as const, value: 'button', exact: false }
+    expect((await h.frame.locate?.(url, role))?.count).toBe(2)
+    expect((await h.frame.locate?.(url, { ...role, includeHidden: true }))?.count).toBe(7)
+    expect((await h.frame.locate?.(url, { ...role, name: 'ARIA hidden' }))?.count).toBe(0)
+    expect((await h.frame.locate?.(url, { ...role, name: 'ARIA hidden', includeHidden: true }))?.count).toBe(1)
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
+it('filters role queries by native and ARIA states in the selected document', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<input type="checkbox" checked aria-label="Native on">' +
+    '<input type="checkbox" aria-label="Native off">' +
+    '<div role="checkbox" aria-checked="true" aria-label="ARIA on"></div>' +
+    '<div role="checkbox" aria-checked="false" aria-label="ARIA off"></div>' +
+    '<fieldset disabled><button>Native disabled</button></fieldset>' +
+    '<div aria-disabled="true"><button>ARIA disabled</button></div>' +
+    '<button aria-expanded="true">Open</button><button aria-expanded="false">Closed</button>' +
+    '<button aria-pressed="true">Pressed</button><button aria-pressed="false">Unpressed</button>' +
+    '<div role="tab" aria-selected="true">First</div><div role="tab" aria-selected="false">Second</div>' +
+    '<h4>Fourth</h4><h5 aria-level="7">Seventh</h5>' +
+    '<select><option selected>Chosen</option><option>Other</option></select>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const count = async (value: string, state: Record<string, boolean | number>) =>
+      (await h.frame.locate?.(url, { method: 'getByRole', value, exact: false, ...state }))?.count
+    expect(await count('checkbox', { checked: true })).toBe(2)
+    expect(await count('checkbox', { checked: false })).toBe(2)
+    expect(await count('button', { disabled: true })).toBe(2)
+    expect(await count('button', { disabled: false })).toBe(4)
+    expect(await count('button', { expanded: true })).toBe(1)
+    expect(await count('button', { expanded: false })).toBe(1)
+    expect(await count('button', { pressed: true })).toBe(1)
+    expect(await count('button', { pressed: false })).toBe(1)
+    expect(await count('tab', { selected: true })).toBe(1)
+    expect(await count('tab', { selected: false })).toBe(1)
+    expect(await count('option', { selected: true })).toBe(1)
+    expect(await count('option', { selected: false })).toBe(1)
+    expect(await count('heading', { level: 4 })).toBe(1)
+    expect(await count('heading', { level: 7 })).toBe(1)
+    await expect(h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      level: 0 })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+    await expect(h.frame.locate?.(url, { method: 'getByText', value: 'Open', exact: false,
+      checked: true })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
+it('matches bounded accessible descriptions and SVG icon names', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<span id="detail" hidden>Keep credentials safe</span>' +
+    '<button aria-label="Security" aria-describedby="detail" aria-description="Wrong" title="Tooltip"></button>' +
+    '<button aria-label="More" aria-description="More details" title="Tooltip"></button>' +
+    '<button aria-label="Help" title="Helpful tooltip"></button>' +
+    '<button aria-label="Duplicate" title="Duplicate"></button>' +
+    '<button title="Solo title"></button>' +
+    '<button><svg><title>Download report</title></svg></button>' +
+    '<svg role="img"><title>Usage chart</title></svg>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const count = async (value: string, options: {
+      name?: BrowserTextPattern
+      description?: BrowserTextPattern
+      exact?: boolean
+    }) =>
+      (await h.frame.locate?.(url, { method: 'getByRole', value, exact: options.exact ?? false,
+        ...options }))?.count
+    expect(await count('button', { name: 'Security', description: 'keep CREDENTIALS' })).toBe(1)
+    expect(await count('button', { name: 'Security', description: 'Wrong' })).toBe(0)
+    expect(await count('button', { name: 'More', description: 'More details', exact: true })).toBe(1)
+    expect(await count('button', { name: 'Help', description: 'Helpful tooltip' })).toBe(1)
+    expect(await count('button', { name: 'Duplicate', description: 'Duplicate', exact: true })).toBe(1)
+    expect(await count('button', { name: 'Solo title', description: 'Solo title' })).toBe(0)
+    expect(await count('button', { name: 'Download report' })).toBe(1)
+    expect(await count('img', { name: 'Usage chart' })).toBe(1)
+    expect(await count('button', { name: { __cu: 'regexp', source: '^download\\s+REPORT$', flags: 'i' },
+      exact: true })).toBe(1)
+    expect(await count('button', { name: 'Security',
+      description: { __cu: 'regexp', source: '^Keep\\s+credentials safe$', flags: 'i' } })).toBe(1)
+    await expect(h.frame.locate?.(url, { method: 'getByText', value: 'Help', exact: false,
+      description: 'Tooltip' })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+    await expect(h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      description: 'x'.repeat(121) })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+    await expect(h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      name: { __cu: 'regexp', source: '(', flags: '' } })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+    await expect(h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      description: { __cu: 'regexp', source: 'safe', flags: 'ii' } })).rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
+it('matches RegExp text selectors and relative text filters without changing the selected tab', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<span data-testid="result-v2" title="Issue count">Visible text</span>' +
+    '<input aria-label="Email address" placeholder="Email address">' +
+    '<img alt="Bus icon"><button>Cancel request</button>'
+  Object.defineProperty(fixture.querySelector('span'), 'innerText', { value: 'Visible text', configurable: true })
+  Object.defineProperty(fixture.querySelector('button'), 'innerText', { value: 'Cancel request', configurable: true })
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const pattern = (source: string) => ({ __cu: 'regexp' as const, source, flags: 'i' })
+    const count = async (method: 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' |
+      'getByTitle' | 'getByTestId', source: string) =>
+      (await h.frame.locate?.(url, { method, value: pattern(source), exact: true }))?.count
+    expect(await count('getByText', '^visible\\s+TEXT$')).toBe(1)
+    expect(await count('getByLabel', '^email address$')).toBe(1)
+    expect(await count('getByPlaceholder', '^email address$')).toBe(1)
+    expect(await count('getByAltText', '^bus icon$')).toBe(1)
+    expect(await count('getByTitle', '^issue count$')).toBe(1)
+    expect(await count('getByTestId', '^result-v\\d$')).toBe(1)
+    expect((await h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      filter: { hasText: pattern('^cancel request$') } }))?.count).toBe(1)
+    expect((await h.frame.locate?.(url, { method: 'getByRole', value: 'button', exact: false,
+      filter: { hasNotText: pattern('^cancel request$') } }))?.count).toBe(0)
+    await expect(h.frame.locate?.(url, { method: 'getByText', value: pattern('('), exact: false }))
       .rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
   } finally {
     await h.dispose()

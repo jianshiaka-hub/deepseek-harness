@@ -171,6 +171,13 @@ async function qualify() {
     assert.equal(relative.result?.value?.ok, true, JSON.stringify(relative.result))
     assert.match(relative.result.value.result, /RELATIVE_1_0/)
     assert.equal(relative.approvals.filter(approval => approval.allowed).length, 0)
+    const regexpLocate = await control('/invoke', { sessionId,
+      code: `return 'REGEXP_' + [await t.playwright.getByRole('button',{name:/^click test button$/i}).count(),await t.playwright.getByText(/^Shared$/).count(),await t.playwright.getByPlaceholder(/^your name$/i).count(),await t.playwright.getByTestId(/^group-[ab]$/).count(),await t.playwright.getByTestId('group-a').filter({hasText:/^Shared$/}).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-regexp-locator.json'),
+      JSON.stringify({ sessionId, tool: regexpLocate }, null, 2))
+    assert.equal(regexpLocate.result?.value?.ok, true, JSON.stringify(regexpLocate.result))
+    assert.match(regexpLocate.result.value.result, /REGEXP_1_2_1_2_1/)
+    assert.equal(regexpLocate.approvals.filter(approval => approval.allowed).length, 0)
     const nestedRelative = await control('/invoke', { sessionId,
       code: `let chain = t.playwright.locator('.inner').filter({hasText:'Shared'}).getByTestId('duplicate'); return 'NESTED_RELATIVE_' + [await t.playwright.getByTestId('group-a').filter({has:chain}).count(),await t.playwright.getByTestId('group-b').filter({has:chain}).count(),await t.playwright.getByTestId('group-b').filter({hasNot:chain}).count()].join('_');` })
     await writeFile(join(root, 'computer-use-nested-relative-locate.json'), JSON.stringify({ sessionId, tool: nestedRelative }, null, 2))
@@ -318,6 +325,98 @@ async function qualify() {
         .executeJavaScript('document.getElementById("inner").contentDocument.getElementById("frameResult").textContent === "answered"')`),
     'same-origin Sidebar frame prompt answer')
     await writeFile(join(root, 'computer-use-frame-prompt-state.json'), JSON.stringify({ answered: true }))
+    const frameDialogSetup = `(() => {
+      const child = document.getElementById('inner').contentDocument;
+      const confirmButton = child.createElement('button');
+      confirmButton.id = 'frameConfirmAction';
+      confirmButton.textContent = 'Frame confirm';
+      confirmButton.addEventListener('click', () => {
+        child.body.dataset.frameConfirmAnswer = String(child.defaultView.confirm('Private frame confirm'));
+      });
+      const alertButton = child.createElement('button');
+      alertButton.id = 'frameAlertAction';
+      alertButton.textContent = 'Frame alert';
+      alertButton.addEventListener('click', () => {
+        child.defaultView.alert('Private frame alert'); child.body.dataset.frameAlertDone = 'true';
+      });
+      child.body.prepend(confirmButton, alertButton);
+    })()`
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript(${JSON.stringify(frameDialogSetup)})`)
+    const frameConfirm = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame confirm',exact:true}).click(); let frameConfirmDialog = await t.getJsDialog(); if(frameConfirmDialog?.type !== 'confirm') throw Error('FRAME_CONFIRM_MISSING'); await frameConfirmDialog.accept(); return 'FRAME_CONFIRM_OK';` })
+    await writeFile(join(root, 'computer-use-frame-confirm.json'),
+      JSON.stringify({ sessionId, tool: frameConfirm }, null, 2))
+    assert.equal(frameConfirm.result?.value?.ok, true, JSON.stringify(frameConfirm.result))
+    assert.match(frameConfirm.result.value.result, /FRAME_CONFIRM_OK/)
+    assert.equal(frameConfirm.approvals.filter(approval => approval.allowed).length,
+      framePrompt.approvals.filter(approval => approval.allowed).length + 2,
+      'Same-origin frame confirm click and answer each require one-use confirmation')
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.getElementById("inner").contentDocument.body.dataset.frameConfirmAnswer === "true"')`),
+    'same-origin frame confirm answer')
+    const frameAlert = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#inner').getByRole('button',{name:'Frame alert',exact:true}).click(); let frameAlertDialog = await t.getJsDialog(); if(frameAlertDialog?.type !== 'alert') throw Error('FRAME_ALERT_MISSING'); await frameAlertDialog.dismiss(); return 'FRAME_ALERT_OK';` })
+    await writeFile(join(root, 'computer-use-frame-alert.json'),
+      JSON.stringify({ sessionId, tool: frameAlert }, null, 2))
+    assert.equal(frameAlert.result?.value?.ok, true, JSON.stringify(frameAlert.result))
+    assert.match(frameAlert.result.value.result, /FRAME_ALERT_OK/)
+    assert.equal(frameAlert.approvals.filter(approval => approval.allowed).length,
+      frameConfirm.approvals.filter(approval => approval.allowed).length + 2,
+      'Same-origin frame alert click and dismissal each require one-use confirmation')
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.getElementById("inner").contentDocument.body.dataset.frameAlertDone === "true"')`),
+    'same-origin frame alert dismissal')
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.getElementById("inner").contentDocument.getElementById("frameConfirmAction").remove();document.getElementById("inner").contentDocument.getElementById("frameAlertAction").remove()')`)
+    const topDialogSetup = `(() => {
+      window.scrollTo(0,0);
+      const confirmButton = document.createElement('button');
+      confirmButton.id = 'topConfirmAction';
+      confirmButton.textContent = 'Top confirm';
+      confirmButton.addEventListener('click', () => {
+        document.body.dataset.topConfirmAnswer = String(confirm('Private confirm text'));
+      });
+      const alertButton = document.createElement('button');
+      alertButton.id = 'topAlertAction';
+      alertButton.textContent = 'Top alert';
+      alertButton.addEventListener('click', () => {
+        alert('Private alert text'); document.body.dataset.topAlertDone = 'true';
+      });
+      document.body.prepend(confirmButton, alertButton);
+    })()`
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript(${JSON.stringify(topDialogSetup)})`)
+    const topConfirm = await control('/invoke', { sessionId,
+      code: `await t.playwright.getByRole('button',{name:'Top confirm',exact:true}).click(); let topConfirmDialog = await t.getJsDialog(); if(topConfirmDialog?.type !== 'confirm') throw Error('TOP_CONFIRM_MISSING'); await topConfirmDialog.accept(); return 'TOP_CONFIRM_OK';` })
+    await writeFile(join(root, 'computer-use-top-confirm.json'), JSON.stringify({ sessionId, tool: topConfirm }, null, 2))
+    assert.equal(topConfirm.result?.value?.ok, true, JSON.stringify(topConfirm.result))
+    assert.match(topConfirm.result.value.result, /TOP_CONFIRM_OK/)
+    assert.equal(topConfirm.approvals.filter(approval => approval.allowed).length,
+      frameAlert.approvals.filter(approval => approval.allowed).length + 2,
+      'Top-level confirm click and answer each require one-use confirmation')
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.body.dataset.topConfirmAnswer === "true"')`), 'top-level confirm answer')
+    const topAlert = await control('/invoke', { sessionId,
+      code: `await t.playwright.getByRole('button',{name:'Top alert',exact:true}).click(); let topAlertDialog = await t.getJsDialog(); if(topAlertDialog?.type !== 'alert') throw Error('TOP_ALERT_MISSING'); await topAlertDialog.dismiss(); return 'TOP_ALERT_OK';` })
+    await writeFile(join(root, 'computer-use-top-alert.json'), JSON.stringify({ sessionId, tool: topAlert }, null, 2))
+    assert.equal(topAlert.result?.value?.ok, true, JSON.stringify(topAlert.result))
+    assert.match(topAlert.result.value.result, /TOP_ALERT_OK/)
+    assert.equal(topAlert.approvals.filter(approval => approval.allowed).length,
+      topConfirm.approvals.filter(approval => approval.allowed).length + 2,
+      'Top-level alert click and dismissal each require one-use confirmation')
+    await waitFor(() => window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.body.dataset.topAlertDone === "true"')`), 'top-level alert dismissal')
+    await window.webContents.executeJavaScript(`
+      [...document.querySelectorAll('webview')].find(view => view.getURL() === ${JSON.stringify(pageUrl)})
+        .executeJavaScript('document.getElementById("topConfirmAction").remove();document.getElementById("topAlertAction").remove()')`)
     const crossUrl = new URL('/cross-origin', pageUrl).href
     await window.webContents.executeJavaScript(`(${address}).focus(); (${address}).select()`)
     await window.webContents.insertText(crossUrl)
@@ -331,7 +430,7 @@ async function qualify() {
     })()`),
     'cross-origin Sidebar frame ready')
     await waitFor(async () => (await control('/status')).selectedTabs.some(tab =>
-      tab.sessionId === sessionId && tab.observedUrl === crossUrl),
+      tab.sessionId === sessionId && tab.observedUrl === crossUrl && tab.controllerAvailable),
     'cross-origin Sidebar reporter registration', 10000)
     const crossText = await control('/invoke', { sessionId,
       code: `t = await b.tabs.selected(); let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame') || !foreignState.includes('[Frame roles]\\n- button "Cross-origin frame"')) throw Error('FOREIGN_FRAME_ROLES_MISSING'); return 'FOREIGN_ROLES_OK';` })
@@ -347,6 +446,14 @@ async function qualify() {
     assert.equal(crossLocate.result?.isError, false, JSON.stringify(crossLocate.result))
     assert.equal(crossLocate.result?.value?.ok, true, JSON.stringify(crossLocate.result))
     assert.match(crossLocate.result.value.result, /FOREIGN_LOCATOR_OK/)
+    const foreignRegexp = await control('/invoke', { sessionId,
+      code: `let foreign = t.playwright.frameLocator('#foreign'); return 'FOREIGN_REGEXP_' + [await foreign.getByRole('button',{name:/^cross-origin frame$/i}).count(),await foreign.getByText(/^foreign idle$/i).count()].join('_');` })
+    await writeFile(join(root, 'computer-use-cross-origin-regexp-locator.json'),
+      JSON.stringify({ sessionId, tool: foreignRegexp }, null, 2))
+    assert.equal(foreignRegexp.result?.value?.ok, true, JSON.stringify(foreignRegexp.result))
+    assert.match(foreignRegexp.result.value.result, /FOREIGN_REGEXP_1_1/)
+    assert.equal(foreignRegexp.approvals.filter(approval => approval.allowed).length,
+      crossLocate.approvals.filter(approval => approval.allowed).length)
     const crossFill = await control('/invoke', { sessionId,
       code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).fill('Ada'); return 'FOREIGN_FILL_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-fill.json'),
@@ -389,6 +496,49 @@ async function qualify() {
       'document.getElementById("foreignPromptResult").textContent === "answered foreign"'),
     'approved foreign frame prompt answer')
     await foreignFrame.executeJavaScript(`(() => {
+      const confirmButton = document.createElement('button');
+      confirmButton.id = 'foreignConfirmAction';
+      confirmButton.textContent = 'Foreign confirm';
+      confirmButton.addEventListener('click', () => {
+        document.body.dataset.foreignConfirmAnswer = String(confirm('Private confirm text'));
+      });
+      const alertButton = document.createElement('button');
+      alertButton.id = 'foreignAlertAction';
+      alertButton.textContent = 'Foreign alert';
+      alertButton.addEventListener('click', () => {
+        alert('Private alert text'); document.body.dataset.foreignAlertAnswer = 'closed';
+      });
+      document.body.prepend(confirmButton, alertButton);
+    })()`)
+    const foreignConfirm = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign confirm',exact:true}).click(); let confirmDialog = await t.getJsDialog(); if(confirmDialog?.type !== 'confirm') throw Error('FOREIGN_CONFIRM_MISSING'); await confirmDialog.accept(); return 'FOREIGN_CONFIRM_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-confirm.json'),
+      JSON.stringify({ sessionId, tool: foreignConfirm }, null, 2))
+    assert.equal(foreignConfirm.result?.value?.ok, true, JSON.stringify(foreignConfirm.result))
+    assert.match(foreignConfirm.result.value.result, /FOREIGN_CONFIRM_OK/)
+    assert.equal(foreignConfirm.approvals.filter(approval => approval.allowed).length,
+      foreignPrompt.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign confirm click and answer each need one-use confirmation')
+    await waitFor(() => foreignFrame.executeJavaScript(
+      'document.body.dataset.foreignConfirmAnswer === "true"'),
+    'approved foreign frame confirm answer')
+    const foreignAlert = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign alert',exact:true}).click(); let alertDialog = await t.getJsDialog(); if(alertDialog?.type !== 'alert') throw Error('FOREIGN_ALERT_MISSING'); await alertDialog.dismiss(); return 'FOREIGN_ALERT_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-alert.json'),
+      JSON.stringify({ sessionId, tool: foreignAlert }, null, 2))
+    assert.equal(foreignAlert.result?.value?.ok, true, JSON.stringify(foreignAlert.result))
+    assert.match(foreignAlert.result.value.result, /FOREIGN_ALERT_OK/)
+    assert.equal(foreignAlert.approvals.filter(approval => approval.allowed).length,
+      foreignConfirm.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign alert click and dismissal each need one-use confirmation')
+    await waitFor(() => foreignFrame.executeJavaScript(
+      'document.body.dataset.foreignAlertAnswer === "closed"'),
+    'approved foreign frame alert dismissal')
+    await foreignFrame.executeJavaScript(`(() => {
+      document.getElementById('foreignConfirmAction').remove();
+      document.getElementById('foreignAlertAction').remove();
+    })()`)
+    await foreignFrame.executeJavaScript(`(() => {
       const input = document.querySelector('input[aria-label="Foreign name"]');
       input.setSelectionRange(input.value.length,input.value.length);
       window.__foreignPasteEvents = [];
@@ -416,7 +566,7 @@ async function qualify() {
     assert.equal(crossPaste.result?.value?.ok, true, JSON.stringify(crossPaste.result))
     assert.match(crossPaste.result.value.result, /FOREIGN_PASTE_OK/)
     assert.equal(crossPaste.approvals.filter(approval => approval.allowed).length,
-      foreignPrompt.approvals.filter(approval => approval.allowed).length + 1,
+      foreignAlert.approvals.filter(approval => approval.allowed).length + 1,
       'Foreign-frame paste needs one-use action confirmation')
     assert.deepEqual(await foreignFrame.executeJavaScript(`({
       value:document.querySelector('input[aria-label="Foreign name"]').value,
@@ -703,6 +853,56 @@ async function qualify() {
     assert.deepEqual(foreignHoverState,{trusted:'true',clicked:null,text:'Hover opened'})
     await writeFile(join(root, 'computer-use-cross-origin-hover.json'),
       JSON.stringify({ sessionId, tool: crossHover, foreignHoverState }, null, 2))
+    await foreignFrame.executeJavaScript(`(() => {
+      const button = document.createElement('button');
+      button.textContent = 'Foreign leave';
+      window.__foreignLeaveHandler = event => { event.preventDefault(); event.returnValue = ''; };
+      addEventListener('beforeunload', window.__foreignLeaveHandler);
+      button.addEventListener('click', () => {
+        document.body.dataset.foreignLeaveActivated = String(navigator.userActivation.hasBeenActive);
+        location.assign('/next');
+      });
+      document.body.prepend(button);
+    })()`)
+    const foreignLeaveEvents = []
+    const foreignLeaveStart = Date.now()
+    const onForeignLeaveDebugger = (_event, method, params) => {
+      if (method === 'Page.javascriptDialogOpening' || method === 'Page.javascriptDialogClosed') {
+        foreignLeaveEvents.push({ ms: Date.now() - foreignLeaveStart,
+          method, type: params?.type, url: params?.url, result: params?.result })
+      }
+    }
+    const onForeignLeaveNative = raw => {
+      foreignLeaveEvents.push({ ms: Date.now() - foreignLeaveStart, method: '-run-dialog',
+        type: raw?.dialogType, source: raw?.frame?.url })
+    }
+    const onForeignLeavePrevent = () => {
+      foreignLeaveEvents.push({ ms: Date.now() - foreignLeaveStart, method: 'will-prevent-unload' })
+    }
+    foreignGuest.debugger.on('message', onForeignLeaveDebugger)
+    foreignGuest.on('-run-dialog', onForeignLeaveNative)
+    foreignGuest.on('will-prevent-unload', onForeignLeavePrevent)
+    const foreignLeaveClosed = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign leave',exact:true}).click(); if(await t.getJsDialog()) throw Error('CHROMIUM_CLOSED_DIALOG_EXPOSED'); return 'FOREIGN_BEFOREUNLOAD_CLOSED';` })
+    foreignGuest.debugger.off('message', onForeignLeaveDebugger)
+    foreignGuest.off('-run-dialog', onForeignLeaveNative)
+    foreignGuest.off('will-prevent-unload', onForeignLeavePrevent)
+    assert.equal(foreignLeaveClosed.result?.value?.ok, true, JSON.stringify(foreignLeaveClosed.result))
+    assert.match(foreignLeaveClosed.result.value.result, /FOREIGN_BEFOREUNLOAD_CLOSED/)
+    assert.equal(foreignLeaveClosed.approvals.filter(approval => approval.allowed).length,
+      crossHover.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign click needs one-use confirmation; Chromium-closed dialog must not be offered')
+    assert.equal(foreignFrame.url.endsWith('/frame'), true, 'closed dialog must keep the foreign frame')
+    assert.equal(await foreignFrame.executeJavaScript('document.body.dataset.foreignLeaveActivated'), 'true')
+    await foreignFrame.executeJavaScript(`(() => {
+      removeEventListener('beforeunload', window.__foreignLeaveHandler);
+      document.querySelector('button')?.remove();
+    })()`)
+    await writeFile(join(root, 'computer-use-cross-origin-beforeunload.json'),
+      JSON.stringify({ sessionId, tool: foreignLeaveClosed, foreignLeaveEvents,
+        actionFinishedMs: Date.now() - foreignLeaveStart,
+        guestPreferences: foreignGuest.getLastWebPreferences(),
+        activated: true, frameUrl: foreignFrame.url }, null, 2))
     const createdUrl = new URL('/created', pageUrl).href
     const created = await control('/invoke', { sessionId,
       code: `let createdTab = await b.tabs.new(${JSON.stringify(createdUrl)}); let activeTab = await b.tabs.selected(); if (activeTab?.id !== createdTab.id) throw Error('CREATED_TAB_NOT_SELECTED'); let oldUnavailable = false; try { await t.getAXState({emit:false}); } catch { oldUnavailable = true; } if (!oldUnavailable) throw Error('OLD_TAB_STILL_EXPOSED'); return 'CREATED_' + createdTab.id + '_' + (await createdTab.getAXState({emit:false})).includes('Isolated Computer Use');` })
@@ -712,7 +912,7 @@ async function qualify() {
     assert.equal(created.result?.value?.ok, true, JSON.stringify(created.result))
     assert.match(created.result.value.result, /CREATED_sidebar:.*_true/)
     assert.equal(created.approvals.filter(approval => approval.allowed).length,
-      crossHover.approvals.filter(approval => approval.allowed).length,
+      foreignLeaveClosed.approvals.filter(approval => approval.allowed).length,
       'same-origin tab creation and read need no action confirmation')
     const blankCreated = await control('/invoke', { sessionId,
       code: `let blankTab = await b.tabs.new(); if (await blankTab.url() !== 'about:blank') throw Error('BLANK_URL_MISSING'); if ((await blankTab.getAXState({emit:false})) !== '') throw Error('BLANK_NOT_EMPTY'); let selectedBlank = await b.tabs.selected(); if (selectedBlank?.id !== blankTab.id) throw Error('BLANK_NOT_SELECTED'); return 'BLANK_' + blankTab.id;` })

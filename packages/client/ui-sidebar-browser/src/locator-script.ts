@@ -1,23 +1,50 @@
 /** Fixed document queries shared by the selected Webview and its native frame bridge. */
 import type { BrowserLocateQuery } from './types.ts'
 
+function validSidebarTextPattern(value: unknown, maxStringLength: number): boolean {
+  if (typeof value === 'string') return value.length <= maxStringLength
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const pattern = value as Record<string, unknown>
+  if (Object.keys(pattern).length !== 3 || !['__cu', 'source', 'flags'].every(key => Object.hasOwn(pattern, key)) ||
+    pattern.__cu !== 'regexp' || typeof pattern.source !== 'string' || pattern.source.length > 120 ||
+    typeof pattern.flags !== 'string' || !/^[dgimsuvy]*$/u.test(pattern.flags) ||
+    new Set(pattern.flags).size !== pattern.flags.length ||
+    pattern.flags.includes('u') && pattern.flags.includes('v')) return false
+  try { new RegExp(pattern.source, pattern.flags); return true }
+  catch { return false }
+}
+
 function validSidebarLocateSelector(value: unknown, extraKeys: readonly string[] = [], depth = 0): boolean {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const selector = value as Record<string, unknown>
   const filter = selector.filter
   return typeof selector.method === 'string' &&
     ['getByRole', 'locator', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByAltText', 'getByTitle', 'getByTestId'].includes(selector.method) &&
-    Object.keys(selector).every(key => ['method', 'value', 'name', 'exact', 'filter', ...extraKeys].includes(key)) &&
-    typeof selector.value === 'string' && selector.value.trim().length > 0 &&
-    selector.value.length <= (selector.method === 'locator' ? 256 : 120) &&
-    (selector.method !== 'getByRole' || /^[a-z][a-z0-9-]{0,31}$/u.test(selector.value)) &&
-    (selector.name === undefined || selector.method === 'getByRole' && typeof selector.name === 'string' &&
-      selector.name.length <= 60) && typeof selector.exact === 'boolean' &&
+    Object.keys(selector).every(key => ['method', 'value', 'name', 'description', 'exact', 'includeHidden',
+      'checked', 'disabled', 'expanded', 'level', 'pressed', 'selected', 'filter', ...extraKeys].includes(key)) &&
+    (selector.method === 'locator' || selector.method === 'getByRole'
+      ? typeof selector.value === 'string' && selector.value.trim().length > 0 &&
+        selector.value.length <= (selector.method === 'locator' ? 256 : 120)
+      : validSidebarTextPattern(selector.value, 120) &&
+        (typeof selector.value !== 'string' || selector.value.trim().length > 0)) &&
+    (selector.method !== 'getByRole' || typeof selector.value === 'string' &&
+      /^[a-z][a-z0-9-]{0,31}$/u.test(selector.value)) &&
+    (selector.name === undefined || selector.method === 'getByRole' &&
+      validSidebarTextPattern(selector.name, 60)) && typeof selector.exact === 'boolean' &&
+    (selector.description === undefined || selector.method === 'getByRole' &&
+      validSidebarTextPattern(selector.description, 120)) &&
+    (selector.includeHidden === undefined || selector.method === 'getByRole' &&
+      typeof selector.includeHidden === 'boolean') &&
+    (['checked', 'disabled', 'expanded', 'pressed', 'selected'].every(key =>
+      selector[key] === undefined || selector.method === 'getByRole' && typeof selector[key] === 'boolean')) &&
+    (selector.level === undefined || selector.method === 'getByRole' &&
+      Number.isSafeInteger(selector.level) && Number(selector.level) >= 1 && Number(selector.level) <= 99) &&
     (filter === undefined || filter !== null && typeof filter === 'object' &&
       !Array.isArray(filter) && Object.keys(filter).length > 0 &&
       Object.entries(filter).every(([key, nested]) =>
         key === 'visible' ? typeof nested === 'boolean' : ['hasText', 'hasNotText'].includes(key)
-          ? typeof nested === 'string' && nested.length > 0 && nested.length <= 120
+          ? validSidebarTextPattern(nested, 120) &&
+            (typeof nested !== 'string' || nested.length > 0)
           : ['has', 'hasNot'].includes(key) && depth < 2 && validSidebarRelativeQuery(nested, depth + 1)))
 }
 
@@ -65,7 +92,7 @@ export function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine 
 
 /** Fixed document helpers shared by selected-tab queries and native child-frame reads. */
 export const guestDomHelpers = String.raw`
-  const sidebarSelector = 'a,button,input,textarea,select,img[alt],area[alt],[role],[contenteditable],h1,h2,h3';
+  const sidebarSelector = 'a,button,input,textarea,select,option,img[alt],area[alt],[role],[contenteditable],h1,h2,h3,h4,h5,h6';
   const sidebarFrames = (doc = document) => [...doc.querySelectorAll('iframe,frame')].slice(0, 100);
   const sidebarFrameDocument = (frame) => {
     try {
@@ -122,7 +149,7 @@ export const guestDomHelpers = String.raw`
       .map(label => (label.innerText || label.textContent || '').slice(0,160)).join(' ').trim() : '';
     return labels;
   };
-  const sidebarAccessibleName = (node) => {
+  const sidebarAccessibleName = (node, skipTitle = false) => {
     const label = sidebarLabelName(node);
     if (label) return label;
     if (node.tagName === 'INPUT' && ['button','submit','reset'].includes(node.type) && node.value) return node.value;
@@ -130,18 +157,36 @@ export const guestDomHelpers = String.raw`
       const alt = node.getAttribute('alt') || '';
       if (alt) return alt;
     }
+    if (node.tagName.toLowerCase() === 'svg') {
+      const title = [...node.children].find(child => child.tagName.toLowerCase() === 'title');
+      if (title?.textContent) return title.textContent;
+    }
     if (node.innerText) return node.innerText;
     if (['BUTTON','A'].includes(node.tagName)) {
-      const image = node.querySelector('img[alt],input[type=image][alt]');
+      const image = node.querySelector('img[alt],input[type=image][alt],svg > title');
+      if (image?.tagName.toLowerCase() === 'title' && image.textContent) return image.textContent;
       if (image?.getAttribute('alt')) return image.getAttribute('alt');
     }
+    if (skipTitle && node.getAttribute('title')) return '';
     return node.getAttribute('title') || node.getAttribute('placeholder') || '';
+  };
+  const sidebarAccessibleDescription = (node) => {
+    const describedBy = node.getAttribute('aria-describedby');
+    if (describedBy !== null) return describedBy.trim().split(/\s+/).filter(Boolean).slice(0,8)
+      .map(id => {
+        const target = node.ownerDocument.getElementById(id);
+        return target ? (target.innerText || target.textContent || '').slice(0,160) : '';
+      }).join(' ').trim();
+    const aria = node.getAttribute('aria-description');
+    if (aria !== null) return aria;
+    const title = node.getAttribute('title') || '';
+    return title && sidebarAccessibleName(node, true) ? title : '';
   };
   const sidebarDescribe = (node) => {
     const rawRole = node.getAttribute('role') || '';
     const role = /^[a-z][a-z0-9-]{0,31}$/.test(rawRole) ? rawRole :
       node.tagName === 'INPUT' ? ({number:'spinbutton',range:'slider',checkbox:'checkbox',radio:'radio',image:'button',button:'button',submit:'button',reset:'button',search:'searchbox'})[node.type] || 'textbox' :
-      ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
+      ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',OPTION:'option',LI:'listitem',TR:'row',H1:'heading',H2:'heading',H3:'heading',H4:'heading',H5:'heading',H6:'heading'})[node.tagName] ||
         (node.getAttribute('contenteditable') !== null ? 'textbox' : node.tagName.toLowerCase());
     const name = sidebarAccessibleName(node)
       .trim().replace(/\s+/g, ' ').replaceAll('[ref=', '[ref =').slice(0, 60);
@@ -223,9 +268,57 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
       ${guestDomHelpers}
       const query = ${JSON.stringify(query)};
       const normalize = (value) => String(value || '').trim().replace(/\\s+/g,' ');
-      const textMatches = (value,needle,exact) => exact
-        ? normalize(value) === normalize(needle)
-        : normalize(value).toLocaleLowerCase().includes(normalize(needle).toLocaleLowerCase());
+      const textMatches = (value,needle,exact) => {
+        if (needle && typeof needle === 'object' && needle.__cu === 'regexp') {
+          return new RegExp(needle.source,needle.flags).test(normalize(value));
+        }
+        return exact ? normalize(value) === normalize(needle)
+          : normalize(value).toLocaleLowerCase().includes(normalize(needle).toLocaleLowerCase());
+      };
+      const excludedAncestors = new WeakMap();
+      const ariaHidden = (node) => {
+        const chain = [];
+        let current = node;
+        while (current && !excludedAncestors.has(current)) {
+          chain.push(current);
+          current = current.parentElement;
+        }
+        let excluded = current ? excludedAncestors.get(current) : false;
+        for (let index = chain.length - 1; index >= 0; index--) {
+          const element = chain[index];
+          if (!excluded) {
+            const style = element.ownerDocument.defaultView.getComputedStyle(element);
+            excluded = element.getAttribute('aria-hidden') === 'true' ||
+              element.getAttribute('hidden') !== null || element.getAttribute('inert') !== null ||
+              style.display === 'none' || style.contentVisibility === 'hidden';
+          }
+          excludedAncestors.set(element,excluded);
+        }
+        if (excluded) return true;
+        const visibility = node.ownerDocument.defaultView.getComputedStyle(node).visibility;
+        return visibility === 'hidden' || visibility === 'collapse';
+      };
+      const ariaBoolean = (node,name) => {
+        const value = node.getAttribute('aria-' + name);
+        return value === 'true' ? true : value === 'false' ? false : undefined;
+      };
+      const roleState = (node,role,name) => {
+        if (name === 'disabled') return node.matches(':disabled') ||
+          !!node.closest('[aria-disabled="true"]');
+        if (name === 'checked' && node.tagName === 'INPUT' &&
+          ['checkbox','radio'].includes(node.type)) return node.checked;
+        if (name === 'selected' && node.tagName === 'OPTION') return node.selected;
+        if (name === 'level') {
+          const raw = node.getAttribute('aria-level');
+          if (raw !== null) {
+            const level = Number(raw);
+            return Number.isSafeInteger(level) && level > 0 ? level : undefined;
+          }
+          if (role === 'heading' && /^H[1-6]$/.test(node.tagName)) return Number(node.tagName[1]);
+          return undefined;
+        }
+        return ariaBoolean(node,name);
+      };
       const matchesBase = (node,selector) => {
         if (selector.method === 'locator') {
           try { return node.matches(selector.value); }
@@ -234,12 +327,22 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
         if (selector.method === 'getByRole') {
           const described = sidebarDescribe(node);
           return described.role === selector.value &&
-            (selector.name === undefined || textMatches(described.name,selector.name,selector.exact));
+            (selector.includeHidden || !ariaHidden(node)) &&
+            (selector.name === undefined || textMatches(described.name,selector.name,selector.exact)) &&
+            (selector.description === undefined ||
+              textMatches(sidebarAccessibleDescription(node),selector.description,selector.exact)) &&
+            ['checked','disabled','expanded','level','pressed','selected'].every(name =>
+              selector[name] === undefined || roleState(node,described.role,name) === selector[name]);
         }
-        if (selector.method === 'getByTestId') return node.getAttribute('data-testid') === selector.value;
+        if (selector.method === 'getByTestId') {
+          const id = node.getAttribute('data-testid');
+          return id !== null && (typeof selector.value === 'string'
+            ? id === selector.value : new RegExp(selector.value.source,selector.value.flags).test(id));
+        }
         let text = '';
         if (selector.method === 'getByText') {
-          text = node.innerText || '';
+          text = node.tagName === 'INPUT' && ['button','submit'].includes(node.type)
+            ? node.value : node.innerText || '';
           if (!textMatches(text,selector.value,selector.exact)) return false;
           return ![...node.children].some(child =>
             textMatches(child.innerText || '',selector.value,selector.exact));

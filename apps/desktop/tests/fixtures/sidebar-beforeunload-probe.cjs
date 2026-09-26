@@ -57,12 +57,10 @@ async function run() {
       browserGuests = new DesktopBrowserGuests(() => 'http://127.0.0.1:9999/')
       browserGuests.leases.set(serviceLease, { owner: window.webContents, partition: 'probe', attached: true, guest })
     }
-    await window.webContents.executeJavaScript(`(async () => {
-      const webview = document.querySelector('webview');
-      await webview.sendInputEvent({type:'mouseMove',x:60,y:50});
-      await webview.sendInputEvent({type:'mouseDown',x:60,y:50,button:'left',clickCount:1});
-      await webview.sendInputEvent({type:'mouseUp',x:60,y:50,button:'left',clickCount:1});
-    })()`)
+    guest.sendInputEvent({ type: 'mouseMove', x: 60, y: 50 })
+    guest.sendInputEvent({ type: 'mouseDown', x: 60, y: 50, button: 'left', clickCount: 1 })
+    guest.sendInputEvent({ type: 'mouseUp', x: 60, y: 50, button: 'left', clickCount: 1 })
+    await new Promise(resolve => setTimeout(resolve, 100))
     const activated = await guest.executeJavaScript(`({armed:window.__armed,
       active:navigator.userActivation.hasBeenActive,hit:document.elementFromPoint(60,50)?.id})`)
     if (!activated.armed || !activated.active) {

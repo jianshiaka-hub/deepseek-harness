@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
 
 const { DesktopBrowserGuests } = await import('../src/browser-guests.ts')
 const url = 'https://example.test/page'
+const foreignUrl = 'https://foreign.test/frame'
 const leaseId = 'test-owned-guest'
 
 function fixture() {
@@ -26,8 +27,13 @@ function fixture() {
     sendCommand: vi.fn(async (method: string): Promise<object> =>
       method === 'Page.addScriptToEvaluateOnNewDocument' ? { identifier: 'dialog-shim' } : {}),
   })
+  const mainFrame = { url, origin: new URL(url).origin, frameTreeNodeId: 1, detached: false,
+    framesInSubtree: [] as unknown[] }
+  mainFrame.framesInSubtree.push(mainFrame,
+    { url: foreignUrl, origin: new URL(foreignUrl).origin, frameTreeNodeId: 2, detached: false })
   const guest = Object.assign(guestEvents, {
     debugger: debuggerPort,
+    mainFrame,
     isDestroyed: () => false,
     isLoadingMainFrame: () => false,
     getURL: () => url,
@@ -36,7 +42,8 @@ function fixture() {
   const privateState = guests as unknown as { readonly leases: Map<string, unknown> }
   privateState.leases.set(leaseId, { owner, partition: 'isolated', attached: true, guest })
   return { guests, owner: owner as unknown as WebContents,
-    other: other as unknown as WebContents, guest: guest as unknown as WebContents, debuggerPort }
+    other: other as unknown as WebContents, guest: guest as unknown as WebContents,
+    guestEvents, debuggerPort }
 }
 
 it('routes one confirm only from the owned and exact-origin guest to its current dialog lease', async () => {
@@ -70,4 +77,57 @@ it('dismisses a held guest confirm when the owning lease ends', async () => {
   await h.guests.finishDialog(h.owner, leaseId, token)
   expect(answer).toHaveBeenCalledExactlyOnceWith(false)
   expect(h.debuggerPort.isAttached()).toBe(false)
+})
+
+it('routes native foreign-frame dialogs only through the approved owner lease', async () => {
+  const h = fixture()
+  h.guestEvents.on('-run-dialog', vi.fn())
+  const internal = h.guests as unknown as {
+    readonly dialogLease: { installNativeDialogGuard: (guest: WebContents,
+      offer: (source: string, type: 'alert' | 'confirm' | 'prompt',
+        respond: (action: 'accept' | 'dismiss', text?: string) => void) => boolean) => boolean }
+    offerNativeDialog: (guest: WebContents, source: string, type: 'alert' | 'confirm' | 'prompt',
+      respond: (action: 'accept' | 'dismiss', text?: string) => void) => boolean
+  }
+  expect(internal.dialogLease.installNativeDialogGuard(h.guest,
+    (source, type, respond) => internal.offerNativeDialog(h.guest, source, type, respond))).toBe(true)
+  const origins = [new URL(url).origin, new URL(foreignUrl).origin]
+  const first = await h.guests.beginDialog(h.owner, leaseId, url, origins)
+  const unapproved = vi.fn()
+  h.guestEvents.emit('-run-dialog', { frame: { url: 'https://unapproved.test/frame' },
+    dialogType: 'confirm', messageText: 'Private page text' }, unapproved)
+  expect(unapproved).toHaveBeenCalledExactlyOnceWith(false, '')
+  expect(h.guests.getDialog(h.owner, leaseId, first)).toBeNull()
+  const promptReply = vi.fn()
+  h.guestEvents.emit('-run-dialog', { frame: { url: foreignUrl },
+    dialogType: 'prompt', defaultPromptText: 'Seed', messageText: 'Private page text' }, promptReply)
+  const prompt = h.guests.getDialog(h.owner, leaseId, first)
+  expect(prompt?.type).toBe('prompt')
+  expect(JSON.stringify(prompt)).not.toContain('Private page text')
+  await expect(h.guests.handleDialog(h.other, leaseId, first, prompt!.id, 'accept', 'answer'))
+    .rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+  expect(promptReply).not.toHaveBeenCalled()
+  await h.guests.handleDialog(h.owner, leaseId, first, prompt!.id, 'accept', 'answer')
+  expect(promptReply).toHaveBeenCalledExactlyOnceWith(true, 'answer')
+  expect(h.debuggerPort.isAttached()).toBe(false)
+
+  const second = await h.guests.beginDialog(h.owner, leaseId, url, origins)
+  const confirmReply = vi.fn()
+  h.guestEvents.emit('-run-dialog', { frame: { url: foreignUrl },
+    dialogType: 'confirm', messageText: 'Private page text' }, confirmReply)
+  const confirm = h.guests.getDialog(h.owner, leaseId, second)
+  expect(confirm?.type).toBe('confirm')
+  await h.guests.handleDialog(h.owner, leaseId, second, confirm!.id, 'accept', undefined)
+  expect(confirmReply).toHaveBeenCalledExactlyOnceWith(true, '')
+
+  const third = await h.guests.beginDialog(h.owner, leaseId, url, origins)
+  const canceled = vi.fn()
+  h.guestEvents.emit('-run-dialog', { frame: { url: foreignUrl },
+    dialogType: 'alert' }, canceled)
+  const alert = h.guests.getDialog(h.owner, leaseId, third)
+  expect(alert?.type).toBe('alert')
+  h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', {})
+  expect(canceled).toHaveBeenCalledExactlyOnceWith(false, '')
+  await expect(h.guests.handleDialog(h.owner, leaseId, third, alert!.id, 'accept', undefined))
+    .rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
 })

@@ -37,14 +37,24 @@ export interface BrowserForeignText {
 }
 
 /** One bounded selector and optional local filter over the approved document. */
+export type BrowserTextPattern = string | { readonly __cu: 'regexp'; readonly source: string; readonly flags: string }
+
 export interface BrowserLocateSelector {
   readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
-  readonly value: string
-  readonly name?: string
+  readonly value: BrowserTextPattern
+  readonly name?: BrowserTextPattern
+  readonly description?: BrowserTextPattern
   readonly exact: boolean
+  readonly includeHidden?: boolean
+  readonly checked?: boolean
+  readonly disabled?: boolean
+  readonly expanded?: boolean
+  readonly level?: number
+  readonly pressed?: boolean
+  readonly selected?: boolean
   readonly filter?: {
-    readonly hasText?: string
-    readonly hasNotText?: string
+    readonly hasText?: BrowserTextPattern
+    readonly hasNotText?: BrowserTextPattern
     readonly visible?: boolean
     readonly has?: BrowserRelativeLocateQuery
     readonly hasNot?: BrowserRelativeLocateQuery
@@ -53,8 +63,8 @@ export interface BrowserLocateSelector {
 
 /** Local filters within a relative locator; descendant queries are bounded by validation depth. */
 export interface BrowserRelativeLocateFilter {
-  readonly hasText?: string
-  readonly hasNotText?: string
+  readonly hasText?: BrowserTextPattern
+  readonly hasNotText?: BrowserTextPattern
   readonly visible?: boolean
   readonly has?: BrowserRelativeLocateQuery
   readonly hasNot?: BrowserRelativeLocateQuery

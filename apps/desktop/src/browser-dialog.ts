@@ -182,12 +182,13 @@ export class BrowserDialogLease {
         }
         if (method !== 'Page.javascriptDialogOpening' || !record(params)) return
         if (this.nativeGuards.has(guest) && params.type !== 'beforeunload') return
-        // A subframe from another website has no matching site grant. Dismiss it
-        // without exposing its type or text through this exact-origin lease.
+        // CDP is reserved for beforeunload when the native guard is installed.
+        // A foreign frame may hold it only if the current action preapproved
+        // that frame's exact site origin; page-supplied text is never exported.
         const source = params.url
-        const sameSite = typeof source === 'string' && URL.canParse(source) &&
-          new URL(source).origin === new URL(expectedUrl).origin
-        if (!sameSite || !dialogType(params.type) || active.dialog !== undefined ||
+        const approvedSource = typeof source === 'string' && URL.canParse(source) &&
+          active.approvedPromptOrigins.has(new URL(source).origin)
+        if (!approvedSource || !dialogType(params.type) || active.dialog !== undefined ||
           !this.validGuest(active, params.type === 'beforeunload')) {
           void guest.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
           return
