@@ -334,7 +334,7 @@ async function qualify() {
       tab.sessionId === sessionId && tab.observedUrl === crossUrl),
     'cross-origin Sidebar reporter registration', 10000)
     const crossText = await control('/invoke', { sessionId,
-      code: `let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame') || !foreignState.includes('[Frame roles]\\n- button "Cross-origin frame"')) throw Error('FOREIGN_FRAME_ROLES_MISSING'); return 'FOREIGN_ROLES_OK';` })
+      code: `t = await b.tabs.selected(); let foreignState = await t.getAXState({emit:false}); if(!foreignState.includes('[Approved frame http://127.0.0.1:') || !foreignState.includes('Cross-origin frame') || !foreignState.includes('[Frame roles]\\n- button "Cross-origin frame"')) throw Error('FOREIGN_FRAME_ROLES_MISSING'); return 'FOREIGN_ROLES_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-text.json'),
       JSON.stringify({ sessionId, tool: crossText }, null, 2))
     assert.equal(crossText.result?.isError, false, JSON.stringify(crossText.result))
@@ -364,6 +364,31 @@ async function qualify() {
     assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
       'Ada', 'native input should update the actual foreign document')
     await foreignFrame.executeJavaScript(`(() => {
+      const button = document.createElement('button');
+      button.textContent = 'Foreign prompt';
+      button.addEventListener('click', () => {
+        document.getElementById('foreignPromptResult').textContent =
+          prompt('Foreign question', 'seed') ?? 'dismissed';
+      });
+      const result = document.createElement('p');
+      result.id = 'foreignPromptResult';
+      result.textContent = 'idle';
+      document.body.append(button, result);
+    })()`)
+    const foreignPrompt = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign prompt',exact:true}).click(); let foreignDialog = await t.getJsDialog(); if(foreignDialog?.type !== 'prompt') throw Error('FOREIGN_PROMPT_MISSING'); await foreignDialog.accept('answered foreign'); return 'FOREIGN_PROMPT_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-prompt.json'),
+      JSON.stringify({ sessionId, tool: foreignPrompt }, null, 2))
+    assert.equal(foreignPrompt.result?.isError, false, JSON.stringify(foreignPrompt.result))
+    assert.equal(foreignPrompt.result?.value?.ok, true, JSON.stringify(foreignPrompt.result))
+    assert.match(foreignPrompt.result.value.result, /FOREIGN_PROMPT_OK/)
+    assert.equal(foreignPrompt.approvals.filter(approval => approval.allowed).length,
+      crossFill.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign-frame click and prompt response each need one-use confirmation')
+    await waitFor(() => foreignFrame.executeJavaScript(
+      'document.getElementById("foreignPromptResult").textContent === "answered foreign"'),
+    'approved foreign frame prompt answer')
+    await foreignFrame.executeJavaScript(`(() => {
       const input = document.querySelector('input[aria-label="Foreign name"]');
       input.setSelectionRange(input.value.length,input.value.length);
       window.__foreignPasteEvents = [];
@@ -391,7 +416,7 @@ async function qualify() {
     assert.equal(crossPaste.result?.value?.ok, true, JSON.stringify(crossPaste.result))
     assert.match(crossPaste.result.value.result, /FOREIGN_PASTE_OK/)
     assert.equal(crossPaste.approvals.filter(approval => approval.allowed).length,
-      crossFill.approvals.filter(approval => approval.allowed).length + 1,
+      foreignPrompt.approvals.filter(approval => approval.allowed).length + 1,
       'Foreign-frame paste needs one-use action confirmation')
     assert.deepEqual(await foreignFrame.executeJavaScript(`({
       value:document.querySelector('input[aria-label="Foreign name"]').value,

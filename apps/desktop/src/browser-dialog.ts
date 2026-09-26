@@ -1,5 +1,6 @@
 /** One CDP dialog watch bound to one exact Sidebar guest document. */
 import { randomUUID } from 'node:crypto'
+import type { EventEmitter } from 'node:events'
 type DialogGuest = {
   readonly debugger: {
     isAttached(): boolean
@@ -19,6 +20,8 @@ type DialogGuest = {
 }
 type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 type PromptResponse = string | null | { readonly useDefault: true }
+type NativeDialogType = 'alert' | 'confirm' | 'prompt'
+type NativeDialogResponse = (action: 'accept' | 'dismiss', text?: string) => void
 
 /** Data that may cross the Desktop bridge; page-supplied dialog text stays in the guest. */
 export interface BrowserDialogInfo {
@@ -40,6 +43,7 @@ interface ActiveDialogWatch {
   dialog: BrowserDialogInfo | undefined
   promptReply: ((value: PromptResponse) => void) | undefined
   guestDialogReply: ((value: boolean | undefined) => void) | undefined
+  nativeDialogReply: NativeDialogResponse | undefined
   framePromptScriptId: string | undefined
   closed: boolean
   detached: boolean
@@ -76,6 +80,51 @@ function dialogType(value: unknown): value is DialogType {
 export class BrowserDialogLease {
   private readonly watches = new Map<string, ActiveDialogWatch>()
   private readonly guests = new Set<DialogGuest>()
+  private readonly nativeGuards = new WeakSet<DialogGuest>()
+
+  /** Replace Electron 44's default private dialog listener only when its single-handler shape is intact. */
+  installNativeDialogGuard(guest: DialogGuest,
+    offer: (sourceUrl: string, type: NativeDialogType, respond: NativeDialogResponse) => boolean): boolean {
+    const emitter = guest as unknown as EventEmitter
+    const existing = emitter.listeners('-run-dialog')
+    if (existing.length !== 1 || this.nativeGuards.has(guest)) return false
+    const original = existing[0]
+    if (original === undefined) return false
+    const defaultListener = original as (...args: unknown[]) => void
+    const handler = (raw: unknown, callback: unknown): void => {
+      if (typeof callback !== 'function') return
+      const complete = callback as (accepted: boolean, text: string) => void
+      let answered = false
+      const respond: NativeDialogResponse = (action, text) => {
+        if (answered) return
+        answered = true
+        try { complete(action === 'accept', text ?? '') }
+        catch { /* The guest may have navigated while its dialog was held. */ }
+      }
+      if (raw === null || typeof raw !== 'object' || !('frame' in raw) ||
+        !('dialogType' in raw) || typeof raw.dialogType !== 'string' ||
+        !['alert', 'confirm', 'prompt'].includes(raw.dialogType) ||
+        raw.frame === null || typeof raw.frame !== 'object' ||
+        !('url' in raw.frame) || typeof raw.frame.url !== 'string') {
+        respond('dismiss')
+        return
+      }
+      const type = raw.dialogType as NativeDialogType
+      const defaultText = 'defaultPromptText' in raw && typeof raw.defaultPromptText === 'string'
+        ? raw.defaultPromptText : ''
+      const accepted: NativeDialogResponse = (action, text) => {
+        respond(action, action === 'accept' && type === 'prompt' ? text ?? defaultText : '')
+      }
+      try { if (offer(raw.frame.url, type, accepted)) return }
+      catch { /* A failed lease lookup must still unblock the guest. */ }
+      respond('dismiss')
+    }
+    emitter.off('-run-dialog', defaultListener)
+    try { emitter.on('-run-dialog', handler) }
+    catch (error) { emitter.on('-run-dialog', defaultListener); throw error }
+    this.nativeGuards.add(guest)
+    return true
+  }
 
   get(token: string): BrowserDialogInfo | null {
     const active = this.watches.get(token)
@@ -112,12 +161,17 @@ export class BrowserDialogLease {
       token, guest, expectedUrl, approvedPromptOrigins: new Set(approvedPromptOrigins ?? [topOrigin]),
       waiters: new Set(), timer: undefined, dialog: undefined,
       promptReply: undefined, guestDialogReply: undefined,
+      nativeDialogReply: undefined,
       framePromptScriptId: undefined,
       closed: false, detached: false,
       onMessage: (_event, method, params): void => {
         if (method === 'Page.javascriptDialogClosed') {
           // Chromium can cancel a modal independently of the agent (notably in
           // child frames). Never leave its opaque handle actionable afterward.
+          if (active.nativeDialogReply !== undefined) {
+            void this.close(token).catch(() => {})
+            return
+          }
           if (active.dialog !== undefined && active.promptReply === undefined &&
             active.guestDialogReply === undefined) {
             active.dialog = undefined
@@ -127,6 +181,7 @@ export class BrowserDialogLease {
           return
         }
         if (method !== 'Page.javascriptDialogOpening' || !record(params)) return
+        if (this.nativeGuards.has(guest) && params.type !== 'beforeunload') return
         // A subframe from another website has no matching site grant. Dismiss it
         // without exposing its type or text through this exact-origin lease.
         const source = params.url
@@ -239,6 +294,23 @@ export class BrowserDialogLease {
     return true
   }
 
+  /** Hold one origin-approved Electron dialog without exposing page-supplied text. */
+  offerNativeDialog(token: string, sourceUrl: string, type: NativeDialogType,
+    respond: NativeDialogResponse): boolean {
+    const active = this.watches.get(token)
+    if (active === undefined || active.closed || active.detached || active.dialog !== undefined ||
+      active.promptReply !== undefined || active.guestDialogReply !== undefined ||
+      !this.validGuest(active) || !URL.canParse(sourceUrl) ||
+      !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
+    active.nativeDialogReply = respond
+    active.dialog = { id: randomUUID(), type }
+    if (active.timer !== undefined) clearTimeout(active.timer)
+    active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
+    for (const waiter of active.waiters) waiter(active.dialog)
+    active.waiters.clear()
+    return true
+  }
+
   async handle(token: string, id: string, action: 'accept' | 'dismiss', text?: string): Promise<void> {
     const active = this.watches.get(token)
     if (active === undefined || active.closed || active.detached || !this.validGuest(active) ||
@@ -246,7 +318,14 @@ export class BrowserDialogLease {
       text !== undefined && (active.dialog.type !== 'prompt' || text.length > 4000)) {
       throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
     }
-    if (active.promptReply !== undefined) {
+    if (active.nativeDialogReply !== undefined) {
+      const reply = active.nativeDialogReply
+      active.nativeDialogReply = undefined
+      active.dialog = undefined
+      try { reply(action, text) }
+      finally { await this.close(token) }
+      return
+    } else if (active.promptReply !== undefined) {
       const reply = active.promptReply
       active.promptReply = undefined
       active.dialog = undefined
@@ -296,6 +375,13 @@ export class BrowserDialogLease {
       const type = active.dialog?.type
       active.dialog = undefined
       try { guestDialogReply(type === 'confirm' ? false : undefined) }
+      catch { /* The blocked guest may already be gone. */ }
+    }
+    const nativeDialogReply = active.nativeDialogReply
+    active.nativeDialogReply = undefined
+    if (nativeDialogReply !== undefined) {
+      active.dialog = undefined
+      try { nativeDialogReply('dismiss') }
       catch { /* The blocked guest may already be gone. */ }
     }
     if (!active.detached && active.guest.debugger.isAttached()) {

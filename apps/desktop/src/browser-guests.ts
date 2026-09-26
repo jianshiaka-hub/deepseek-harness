@@ -250,6 +250,17 @@ export class DesktopBrowserGuests {
     respond(type === 'confirm' ? false : undefined)
   }
 
+  /** Route Electron's held child-frame dialog only through the current approved action lease. */
+  private offerNativeDialog(guest: WebContents, sourceUrl: string, type: 'alert' | 'confirm' | 'prompt',
+    respond: (action: 'accept' | 'dismiss', text?: string) => void): boolean {
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerNativeDialog(token, sourceUrl, type, respond)) return true
+    }
+    return false
+  }
+
   /** One fixed, URL-bound navigation per active dialog watch; page code cannot replace the isolated-world method. */
   navigate(owner: WebContents, id: unknown, token: unknown, expectedUrl: unknown,
     method: unknown, destination: unknown): void {
@@ -705,6 +716,11 @@ export class DesktopBrowserGuests {
       params.httpreferrer = ''
     })
     owner.on('did-attach-webview', (_event, guest) => {
+      // The guest keeps disableDialogs=true. When Electron's pinned internal
+      // handler is present, replace it with an immediate default-deny guard;
+      // only an active, origin-approved Computer Use lease can hold a dialog.
+      this.dialogLease.installNativeDialogGuard(guest,
+        (sourceUrl, type, respond) => this.offerNativeDialog(guest, sourceUrl, type, respond))
       let attachedLease: DesktopBrowserLeaseId | undefined
       // The first document is an inert about:blank carrying the approved lease.
       // Bind on the main-process event before the renderer can navigate the ready guest.

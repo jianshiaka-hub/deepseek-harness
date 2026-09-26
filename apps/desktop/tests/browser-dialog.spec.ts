@@ -68,6 +68,65 @@ function fixture() {
 }
 
 describe('one-document Sidebar JavaScript dialog lease', () => {
+  it('holds only an approved native child-frame prompt and defaults other dialogs to dismissal', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const defaultHandler = vi.fn()
+    h.guestEvents.on('-run-dialog', defaultHandler)
+    const current: { token: string | undefined } = { token: undefined }
+    const offered = vi.fn((source: string, type: 'alert' | 'confirm' | 'prompt',
+      reply: (action: 'accept' | 'dismiss', text?: string) => void) =>
+      current.token !== undefined && lease.offerNativeDialog(current.token, source, type, reply))
+    expect(lease.installNativeDialogGuard(h.guest, offered)).toBe(true)
+    expect(h.guestEvents.listenerCount('-run-dialog')).toBe(1)
+    expect(lease.installNativeDialogGuard(h.guest, offered)).toBe(false)
+    const idleReply = vi.fn()
+    h.guestEvents.emit('-run-dialog', { frame: { url }, dialogType: 'confirm',
+      messageText: 'Private idle dialog' }, idleReply)
+    expect(idleReply).toHaveBeenCalledExactlyOnceWith(false, '')
+    const token = await lease.begin(h.guest, url, ['https://example.test', 'https://foreign.test'])
+    current.token = token
+    h.open('prompt', 'https://foreign.test/frame')
+    expect(lease.get(token)).toBeNull()
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Page.handleJavaScriptDialog', { accept: false })
+    const blocked = vi.fn()
+    h.guestEvents.emit('-run-dialog', { frame: { url: 'https://unapproved.test/frame' },
+      dialogType: 'confirm', messageText: 'Private denied dialog' }, blocked)
+    expect(blocked).toHaveBeenCalledExactlyOnceWith(false, '')
+    const reply = vi.fn()
+    h.guestEvents.emit('-run-dialog', { frame: { url: 'https://foreign.test/frame' },
+      dialogType: 'prompt', defaultPromptText: 'Seed', messageText: 'Private prompt' }, reply)
+    expect(offered.mock.calls.at(-1)?.slice(0, 2)).toEqual(['https://foreign.test/frame', 'prompt'])
+    const dialog = lease.get(token)
+    expect(dialog?.type).toBe('prompt')
+    await lease.handle(token, dialog!.id, 'accept')
+    expect(reply).toHaveBeenCalledExactlyOnceWith(true, 'Seed')
+    expect(defaultHandler).not.toHaveBeenCalled()
+    const after = vi.fn()
+    h.guestEvents.emit('-run-dialog', { frame: { url }, dialogType: 'alert' }, after)
+    expect(after).toHaveBeenCalledExactlyOnceWith(false, '')
+  })
+
+  it('dismisses a native child-frame dialog canceled outside the agent', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    h.guestEvents.on('-run-dialog', vi.fn())
+    const current: { token: string | undefined } = { token: undefined }
+    expect(lease.installNativeDialogGuard(h.guest, (source, type, reply) =>
+      current.token !== undefined && lease.offerNativeDialog(current.token, source, type, reply))).toBe(true)
+    const token = await lease.begin(h.guest, url, ['https://example.test', 'https://foreign.test'])
+    current.token = token
+    const reply = vi.fn()
+    h.guestEvents.emit('-run-dialog', { frame: { url: 'https://foreign.test/frame' },
+      dialogType: 'prompt' }, reply)
+    const dialog = lease.get(token)
+    expect(dialog?.type).toBe('prompt')
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', {})
+    expect(reply).toHaveBeenCalledExactlyOnceWith(false, '')
+    expect(() => lease.get(token)).toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    await expect(lease.handle(token, dialog!.id, 'accept', 'late')).rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+  })
+
   it('captures a modal by opaque ID, accepts it once, and detaches from the guest', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()
