@@ -169,6 +169,16 @@ export async function locateBrowserForeignFrame(guest: FullPageCaptureGuest, exp
     !record(row) || typeof row.ref !== 'string' || !/^d\d{1,5}-[0-9a-f]{8}:/u.test(row.ref))) {
     throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
   }
+  if (query.projection === 'allTextContents') {
+    const expected = query.position === undefined ? raw.count :
+      query.position.method === 'nth' ? Number(typeof query.position.index === 'number' &&
+        query.position.index < raw.count) : Number(raw.count > 0)
+    if (raw.rows.length !== 0 || !Array.isArray(raw.texts) || raw.texts.length !== expected ||
+      raw.texts.length > 256 || raw.texts.some((text: unknown) => typeof text !== 'string') ||
+      raw.texts.reduce((length: number, text: string) => length + text.length, 0) > 24000) {
+      throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    }
+  } else if (raw.texts !== undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
   for (const step of path) {
     const again = await resolveForeignFrame(step.parent, step.selector)
     if (again.frame !== step.child || again.descriptor.src !== step.descriptor.src ||
@@ -180,7 +190,8 @@ export async function locateBrowserForeignFrame(guest: FullPageCaptureGuest, exp
   const prefix = `x${frame.frameTreeNodeId}-${before}/`
   const rows = raw.rows as BrowserLocateResult['rows']
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), count: raw.count,
-    rows: rows.map(row => ({ ...row, ref: prefix + row.ref })) }
+    rows: rows.map(row => ({ ...row, ref: prefix + row.ref })),
+    ...(query.projection === 'allTextContents' ? { texts: raw.texts as string[] } : {}) }
 }
 
 /**

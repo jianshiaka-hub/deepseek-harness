@@ -36,7 +36,7 @@ function validSidebarRelativeQuery(value: unknown, depth: number): boolean {
  */
 export function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
   return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'combine']) &&
-    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text', 'textContent'].includes(query.projection)) &&
+    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text', 'textContent', 'allTextContents'].includes(query.projection)) &&
     (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
       query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Query arrives as Host RPC JSON, which may contain null.
@@ -342,11 +342,20 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
         matchChain([...(query.combine.query.scopes || []),query.combine.query]),
         query.combine.query.position);
       let count = 0, first = null, last = null, nth = null;
+      const allTexts = [];
+      let totalText = 0;
       for (const [index,node] of nodes.entries()) {
         const included = secondary === null ? primary.has(node)
           : query.combine.method === 'and' ? primary.has(node) && secondary.has(node)
             : primary.has(node) || secondary.has(node);
         if (!included) continue;
+        if (query.projection === 'allTextContents' && query.position === undefined) {
+          if (allTexts.length >= 256) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+          const text = String(node.textContent ?? '');
+          totalText += text.length;
+          if (totalText > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+          allTexts.push(text);
+        }
         const candidate = {doc,prefix,index,node};
         if (count === 0) first = candidate;
         if (query.position?.method === 'nth' && count === query.position.index) nth = candidate;
@@ -356,7 +365,12 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
       const chosen = query.position?.method === 'first' ? first
         : query.position?.method === 'last' ? last
           : query.position?.method === 'nth' ? nth : count === 1 ? first : null;
-      const rows = chosen === null ? [] : (() => {
+      if (query.projection === 'allTextContents' && query.position !== undefined && chosen !== null) {
+        const text = String(chosen.node.textContent ?? '');
+        if (text.length > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+        allTexts.push(text);
+      }
+      const rows = query.projection === 'allTextContents' || chosen === null ? [] : (() => {
         const {doc,prefix,index,node} = chosen;
         const {role,name} = sidebarDescribe(node);
         return [{ref:prefix + 'd' + index + '-' + sidebarDomFingerprint(doc,node,index)
@@ -386,6 +400,7 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
             return text;
           })()} : {})}];
       })();
-      return {url:location.href,title:document.title.slice(0,512),count,rows};
+      return {url:location.href,title:document.title.slice(0,512),count,rows,
+        ...(query.projection === 'allTextContents' ? {texts:allTexts} : {})};
     })()`
 }

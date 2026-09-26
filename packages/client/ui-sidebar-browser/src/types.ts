@@ -74,16 +74,17 @@ export type BrowserRelativeLocateQuery = BrowserRelativeLocateSelector & {
 export interface BrowserLocateQuery extends BrowserLocateSelector {
   readonly frames?: readonly string[]
   readonly scopes?: readonly BrowserLocateSelector[]
-  readonly projection?: 'visible' | 'enabled' | 'checked' | 'text' | 'textContent'
+  readonly projection?: 'visible' | 'enabled' | 'checked' | 'text' | 'textContent' | 'allTextContents'
   readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
   readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
 }
 
-/** Count of matches and at most one document-bound reference or requested state. */
+/** Count, at most one document-bound reference, or a bounded ordered text list. */
 export interface BrowserLocateResult {
   readonly url: string
   readonly title: string
   readonly count: number
+  readonly texts?: readonly string[]
   readonly rows: readonly {
     readonly ref: string
     readonly role: string

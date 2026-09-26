@@ -38,6 +38,41 @@ it('reads bounded textContent from one selected element including hidden descend
   }
 })
 
+it('reads an ordered bounded list of textContent values from the selected document', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<p class="row">Alpha</p><p class="row">Beta<span hidden> hidden</span></p>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const query = { method: 'locator' as const, value: '.row', exact: false,
+      projection: 'allTextContents' as const }
+    expect((await h.frame.locate?.(url, query))?.texts).toEqual(['Alpha','Beta hidden'])
+    expect((await h.frame.locate?.(url, { ...query, position: { method: 'last' } }))?.texts)
+      .toEqual(['Beta hidden'])
+    for (let index = 0; index < 255; index++) {
+      const extra = document.createElement('p')
+      extra.className = 'row'
+      fixture.append(extra)
+    }
+    await expect(h.frame.locate?.(url, query)).rejects.toThrow('SIDEBAR_TEXT_TOO_LARGE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
 it('bounds multi-step relative has filters to descendants of each candidate', async () => {
   const h = electronFixture()
   const fixture = document.createElement('div')

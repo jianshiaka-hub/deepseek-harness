@@ -256,6 +256,17 @@ export class ElectronWebViewImpl implements BrowserFrame {
       value.url !== expectedUrl || typeof value.title !== 'string' ||
       !Number.isSafeInteger(value.count) || value.count < 0 || value.count > 1000000 ||
       !Array.isArray(value.rows) || value.rows.length > 1) throw new Error('SIDEBAR_NAVIGATED')
+    if (query.projection === 'allTextContents') {
+      const expected = query.position === undefined ? value.count :
+        query.position.method === 'nth' ? Number(typeof query.position.index === 'number' &&
+          query.position.index < value.count) : Number(value.count > 0)
+      if (value.rows.length !== 0 || !Array.isArray(value.texts) || value.texts.length !== expected ||
+        value.texts.length > 256 || value.texts.some((text: unknown) => typeof text !== 'string') ||
+        value.texts.reduce((length: number, text: unknown) =>
+          length + (typeof text === 'string' ? text.length : 24001), 0) > 24000) {
+        throw new Error('SIDEBAR_TEXT_UNAVAILABLE')
+      }
+    } else if (value.texts !== undefined) throw new Error('SIDEBAR_TEXT_UNAVAILABLE')
     return value
   }
 

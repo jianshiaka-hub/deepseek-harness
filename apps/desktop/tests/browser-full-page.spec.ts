@@ -183,6 +183,16 @@ describe('main-owned Sidebar full-page capture', () => {
     expect(result.rows[0]?.ref).toMatch(/^x2-[a-f0-9]{64}\/d4-12345678:button:Open$/u)
     expect(first.executeJavaScript).toHaveBeenCalledTimes(1)
     expect(second.executeJavaScript).not.toHaveBeenCalled()
+    first.executeJavaScript.mockResolvedValueOnce({ url: foreignUrl, title: 'Widget', count: 2,
+      rows: [], texts: ['Alpha', 'Beta hidden'] })
+    const textQuery = { method: 'locator' as const, value: '.row', exact: false,
+      projection: 'allTextContents' as const, frames: ['#first'] }
+    expect((await locateBrowserForeignFrame(h.guest, url, textQuery, approved)).texts)
+      .toEqual(['Alpha', 'Beta hidden'])
+    first.executeJavaScript.mockResolvedValueOnce({ url: foreignUrl, title: 'Widget', count: 2,
+      rows: [], texts: ['Alpha'] })
+    await expect(locateBrowserForeignFrame(h.guest, url, textQuery, approved))
+      .rejects.toThrow('SIDEBAR_FRAME_UNAVAILABLE')
     second.name = 'first'
     await expect(locateBrowserForeignFrame(h.guest, url, query, approved))
       .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
