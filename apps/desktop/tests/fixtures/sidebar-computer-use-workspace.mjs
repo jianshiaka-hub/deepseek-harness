@@ -649,6 +649,35 @@ async function qualify() {
     await writeFile(join(root, 'computer-use-cross-origin-scroll.json'),
       JSON.stringify({ sessionId, tool: crossScroll, foreignScrollBefore, foreignScrollAfter,
         topScrollBefore, topScrollAfter }, null, 2))
+    await foreignFrame.executeJavaScript(`(() => {
+      window.scrollTo(0,0);
+      const button = document.createElement('button');
+      button.setAttribute('aria-label','Foreign hover');
+      button.textContent = 'Foreign hover';
+      button.addEventListener('mouseenter',event => {
+        document.body.dataset.foreignHoverTrusted = String(event.isTrusted);
+        button.textContent = 'Hover opened';
+      });
+      button.addEventListener('click',() => {
+        document.body.dataset.foreignHoverClicked = 'true';
+      });
+      document.body.prepend(button);
+    })()`)
+    const crossHover = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Foreign hover',exact:true}).hover(); return 'FOREIGN_HOVER_OK';` })
+    assert.equal(crossHover.result?.value?.ok, true, JSON.stringify(crossHover.result))
+    assert.match(crossHover.result.value.result, /FOREIGN_HOVER_OK/)
+    assert.equal(crossHover.approvals.filter(approval => approval.allowed).length,
+      crossScroll.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame hover needs one-use confirmation')
+    const foreignHoverState = await foreignFrame.executeJavaScript(`({
+      trusted:document.body.dataset.foreignHoverTrusted,
+      clicked:document.body.dataset.foreignHoverClicked ?? null,
+      text:document.querySelector('[aria-label="Foreign hover"]')?.textContent
+    })`)
+    assert.deepEqual(foreignHoverState,{trusted:'true',clicked:null,text:'Hover opened'})
+    await writeFile(join(root, 'computer-use-cross-origin-hover.json'),
+      JSON.stringify({ sessionId, tool: crossHover, foreignHoverState }, null, 2))
     const createdUrl = new URL('/created', pageUrl).href
     const created = await control('/invoke', { sessionId,
       code: `let createdTab = await b.tabs.new(${JSON.stringify(createdUrl)}); let activeTab = await b.tabs.selected(); if (activeTab?.id !== createdTab.id) throw Error('CREATED_TAB_NOT_SELECTED'); let oldUnavailable = false; try { await t.getAXState({emit:false}); } catch { oldUnavailable = true; } if (!oldUnavailable) throw Error('OLD_TAB_STILL_EXPOSED'); return 'CREATED_' + createdTab.id + '_' + (await createdTab.getAXState({emit:false})).includes('Isolated Computer Use');` })
@@ -658,7 +687,7 @@ async function qualify() {
     assert.equal(created.result?.value?.ok, true, JSON.stringify(created.result))
     assert.match(created.result.value.result, /CREATED_sidebar:.*_true/)
     assert.equal(created.approvals.filter(approval => approval.allowed).length,
-      crossScroll.approvals.filter(approval => approval.allowed).length,
+      crossHover.approvals.filter(approval => approval.allowed).length,
       'same-origin tab creation and read need no action confirmation')
     const blankCreated = await control('/invoke', { sessionId,
       code: `let blankTab = await b.tabs.new(); if (await blankTab.url() !== 'about:blank') throw Error('BLANK_URL_MISSING'); if ((await blankTab.getAXState({emit:false})) !== '') throw Error('BLANK_NOT_EMPTY'); let selectedBlank = await b.tabs.selected(); if (selectedBlank?.id !== blankTab.id) throw Error('BLANK_NOT_SELECTED'); return 'BLANK_' + blankTab.id;` })

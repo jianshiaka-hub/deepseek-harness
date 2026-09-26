@@ -1500,6 +1500,24 @@ export class ElectronWebViewImpl implements BrowserFrame {
     const clickCount = action.count ?? 1
     if (!['left','middle','right'].includes(button) || !Number.isSafeInteger(clickCount) ||
       clickCount < 1 || clickCount > 3) throw new Error('SIDEBAR_CLICK_UNAVAILABLE')
+    if (action.hoverOnly === true) {
+      const poised = await element.executeJavaScript(code)
+      if (typeof poised !== 'object' || poised === null || !('x' in poised) || !('y' in poised) ||
+        !('fingerprint' in poised) || poised.x !== point.x || poised.y !== point.y ||
+        poised.fingerprint !== point.fingerprint ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_TARGET_MOVED')
+      if (before !== undefined && lease !== undefined &&
+        (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
+      if (!this.inputStillSelected(element, expectedUrl, stillSelected) ||
+        before !== undefined && lease !== undefined &&
+        (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== before.fingerprint) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return { url: expectedUrl, title: point.title, performed: true }
+    }
     await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
     if (!this.inputStillSelected(element, expectedUrl, stillSelected)) throw new Error('SIDEBAR_SELECTION_CHANGED')
     const moved = await element.executeJavaScript(code)
@@ -1534,6 +1552,21 @@ export class ElectronWebViewImpl implements BrowserFrame {
       point.x < 0 || point.y < 0 || point.x > 8192 || point.y > 8192 ||
       !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
       throw new Error('SIDEBAR_POINT_UNAVAILABLE')
+    }
+    if (action.hoverOnly === true) {
+      const poised = await this.bridge.foreignRefPoint(lease, expectedUrl, ref, approved)
+      if (poised.url !== expectedUrl || poised.origin !== point.origin ||
+        poised.fingerprint !== point.fingerprint || poised.x !== point.x || poised.y !== point.y ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease ||
+        (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== point.fingerprint) {
+        throw new Error('SIDEBAR_TARGET_MOVED')
+      }
+      await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
+      if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease ||
+        (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== point.fingerprint) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      return { url: expectedUrl, title: point.title, performed: true }
     }
     await element.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
     if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {

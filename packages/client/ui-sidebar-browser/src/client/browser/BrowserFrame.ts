@@ -35,6 +35,8 @@ export type BrowserDomAction =
     readonly y?: number
     readonly button?: 'left' | 'middle' | 'right'
     readonly count?: number
+    /** Internal pointer-only variant used by a confirmed locator hover. */
+    readonly hoverOnly?: true
     /** Exact source origins approved before a coordinate click can enter a foreign frame. */
     readonly approvedFrameOrigins?: readonly string[]
     /** Internal precondition for an exposed expand/collapse action. */

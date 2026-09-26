@@ -184,6 +184,10 @@ it('reads top-level text and refs, acts on a matching ref, and refuses navigatio
     expect(await h.frame.action?.(url, { op: 'click', x: 25, y: 30, button: 'right', count: 2 }))
       .toMatchObject({ performed: true, url })
     expect(nativeInput.mock.calls[4]?.[0]).toMatchObject({ x: 25, y: 30, button: 'right', clickCount: 2 })
+    const beforeHover = nativeInput.mock.calls.length
+    expect(await h.frame.action?.(url, { op: 'click', ref: '0:button:Open', hoverOnly: true }))
+      .toMatchObject({ performed: true, url })
+    expect(nativeInput.mock.calls.slice(beforeHover).map(([event]) => event.type)).toEqual(['mouseMove'])
     const hoverInput = vi.fn(async (event: { type: string }) => { if (event.type === 'mouseMove') hit = input })
     Object.assign(guest.element, { sendInputEvent: hoverInput })
     await expect(h.frame.action?.(url, { op: 'click', ref: '0:button:Open' }))

@@ -205,6 +205,13 @@ export function apply(ctx: Context): void {
         return controller.action(tabId, command.expectedUrl,
           { op: 'click', x: command.args.x, y: command.args.y, ...options }, stillSelected)
       }
+      if (command.op === 'hover') {
+        if (command.args.ref === undefined) throw new Error('SIDEBAR_HOVER_UNAVAILABLE')
+        return controller.action(tabId, command.expectedUrl,
+          { op: 'click', ref: command.args.ref, hoverOnly: true,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
+      }
       if (command.op === 'drag') {
         if (command.args.x === undefined || command.args.y === undefined || command.args.to === undefined) {
           throw new Error('SIDEBAR_DRAG_UNAVAILABLE')

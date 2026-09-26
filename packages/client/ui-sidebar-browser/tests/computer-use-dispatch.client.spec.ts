@@ -150,6 +150,7 @@ it('translates only fixed input actions for the selected tab', async () => {
   const cases: readonly [Command['op'], Partial<Command['args']>, object][] = [
     ['click', { ref: 'button', button: 'right', count: 2 }, { op: 'click', ref: 'button', button: 'right', count: 2 }],
     ['click', { x: 10, y: 20 }, { op: 'click', x: 10, y: 20 }],
+    ['hover', { ref: 'button' }, { op: 'click', ref: 'button', hoverOnly: true }],
     ['drag', { x: 10, y: 20, to: { x: 30, y: 40 } }, { op: 'drag', x: 10, y: 20, to: { x: 30, y: 40 } }],
     ['key', { key: 'Enter', ref: 'button' }, { op: 'key', key: 'Enter', ref: 'button' }],
     ['paste', { text: 'hello', format: 'text' }, { op: 'paste', text: 'hello', format: 'text' }],

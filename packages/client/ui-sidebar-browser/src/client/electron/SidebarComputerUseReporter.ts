@@ -42,7 +42,7 @@ interface Command {
   readonly id: string
   readonly sessionId: string
   readonly tabId: string
-  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'gotoBlank' | 'back' | 'forward' | 'close' | 'create' | 'dialog' | 'dialogAction'
+  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'hover' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'gotoBlank' | 'back' | 'forward' | 'close' | 'create' | 'dialog' | 'dialogAction'
   readonly expectedUrl: string
   readonly args: {
     readonly approvedOrigin: string
