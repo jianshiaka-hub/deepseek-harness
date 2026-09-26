@@ -15,8 +15,9 @@ type DialogGuest = {
   isDestroyed(): boolean
   isLoadingMainFrame(): boolean
   getURL(): string
-  on(event: 'did-navigate' | 'destroyed', listener: () => void): void
-  off(event: 'did-navigate' | 'destroyed', listener: () => void): void
+  on: EventEmitter['on']
+  off: EventEmitter['off']
+  listeners: EventEmitter['listeners']
 }
 type DialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 type PromptResponse = string | null | { readonly useDefault: true }
@@ -113,8 +114,7 @@ export class BrowserDialogLease {
   /** Replace Electron 44's default private dialog listener only when its single-handler shape is intact. */
   installNativeDialogGuard(guest: DialogGuest,
     offer: (sourceUrl: string, type: NativeDialogType, respond: NativeDialogResponse) => boolean): boolean {
-    const emitter = guest as unknown as EventEmitter
-    const existing = emitter.listeners('-run-dialog')
+    const existing = guest.listeners('-run-dialog')
     if (existing.length !== 1 || this.nativeGuards.has(guest)) return false
     const original = existing[0]
     if (original === undefined) return false
@@ -147,9 +147,9 @@ export class BrowserDialogLease {
       catch { /* A failed lease lookup must still unblock the guest. */ }
       respond('dismiss')
     }
-    emitter.off('-run-dialog', defaultListener)
-    try { emitter.on('-run-dialog', handler) }
-    catch (error) { emitter.on('-run-dialog', defaultListener); throw error }
+    guest.off('-run-dialog', defaultListener)
+    try { guest.on('-run-dialog', handler) }
+    catch (error) { guest.on('-run-dialog', defaultListener); throw error }
     this.nativeGuards.add(guest)
     return true
   }

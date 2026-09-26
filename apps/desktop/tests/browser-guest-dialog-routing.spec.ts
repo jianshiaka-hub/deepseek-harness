@@ -1,5 +1,4 @@
 import { EventEmitter } from 'node:events'
-import type { WebContents } from 'electron'
 import { expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
@@ -10,13 +9,13 @@ vi.mock('electron', () => ({
 }))
 
 const { DesktopBrowserGuests } = await import('../src/browser-guests.ts')
+const { BrowserDialogLease } = await import('../src/browser-dialog.ts')
 const url = 'https://example.test/page'
 const foreignUrl = 'https://foreign.test/frame'
 const leaseId = 'test-owned-guest'
 
 function fixture() {
   const owner = { isDestroyed: () => false }
-  const other = { isDestroyed: () => false }
   const debuggerEvents = new EventEmitter()
   const guestEvents = new EventEmitter()
   let attached = false
@@ -26,6 +25,12 @@ function fixture() {
     detach: vi.fn(() => { attached = false }),
     sendCommand: vi.fn(async (method: string): Promise<object> =>
       method === 'Page.addScriptToEvaluateOnNewDocument' ? { identifier: 'dialog-shim' } : {}),
+  })
+  const other = Object.assign(new EventEmitter(), {
+    debugger: debuggerPort,
+    isDestroyed: () => false,
+    isLoadingMainFrame: () => false,
+    getURL: () => url,
   })
   const mainFrame = { url, origin: new URL(url).origin, frameTreeNodeId: 1, detached: false,
     framesInSubtree: [] as unknown[] }
@@ -39,11 +44,10 @@ function fixture() {
     getURL: () => url,
   })
   const guests = new DesktopBrowserGuests(() => undefined, '/unused/preload.cjs')
-  const privateState = guests as unknown as { readonly leases: Map<string, unknown> }
-  privateState.leases.set(leaseId, { owner, partition: 'isolated', attached: true, guest })
-  return { guests, owner: owner as unknown as WebContents,
-    other: other as unknown as WebContents, guest: guest as unknown as WebContents,
-    guestEvents, debuggerPort }
+  const leases: unknown = Reflect.get(guests, 'leases')
+  if (!(leases instanceof Map)) throw new Error('DesktopBrowserGuests leases are unavailable')
+  leases.set(leaseId, { owner, partition: 'isolated', attached: true, guest })
+  return { guests, owner, other, guest, guestEvents, debuggerPort }
 }
 
 it('routes one confirm only from the owned and exact-origin guest to its current dialog lease', async () => {
@@ -82,15 +86,13 @@ it('dismisses a held guest confirm when the owning lease ends', async () => {
 it('routes native foreign-frame dialogs only through the approved owner lease', async () => {
   const h = fixture()
   h.guestEvents.on('-run-dialog', vi.fn())
-  const internal = h.guests as unknown as {
-    readonly dialogLease: { installNativeDialogGuard: (guest: WebContents,
-      offer: (source: string, type: 'alert' | 'confirm' | 'prompt',
-        respond: (action: 'accept' | 'dismiss', text?: string) => void) => boolean) => boolean }
-    offerNativeDialog: (guest: WebContents, source: string, type: 'alert' | 'confirm' | 'prompt',
-      respond: (action: 'accept' | 'dismiss', text?: string) => void) => boolean
+  const dialogLease: unknown = Reflect.get(h.guests, 'dialogLease')
+  const offerNativeDialog: unknown = Reflect.get(h.guests, 'offerNativeDialog')
+  if (!(dialogLease instanceof BrowserDialogLease) || typeof offerNativeDialog !== 'function') {
+    throw new Error('DesktopBrowserGuests native dialog routing is unavailable')
   }
-  expect(internal.dialogLease.installNativeDialogGuard(h.guest,
-    (source, type, respond) => internal.offerNativeDialog(h.guest, source, type, respond))).toBe(true)
+  expect(dialogLease.installNativeDialogGuard(h.guest,
+    (source, type, respond) => Reflect.apply(offerNativeDialog, h.guests, [h.guest, source, type, respond]) === true)).toBe(true)
   const origins = [new URL(url).origin, new URL(foreignUrl).origin]
   const first = await h.guests.beginDialog(h.owner, leaseId, url, origins)
   const unapproved = vi.fn()

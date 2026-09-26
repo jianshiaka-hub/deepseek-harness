@@ -23,6 +23,9 @@ interface GuestLease {
   releaseInput?: () => void
 }
 
+type DialogOwner = Pick<WebContents, 'isDestroyed'>
+type DialogGuest = Parameters<BrowserDialogLease['begin']>[0]
+
 /** Owns workspace storage partitions independently from individual tab guests. */
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
@@ -191,7 +194,7 @@ export class DesktopBrowserGuests {
   }
 
   /** Watch only this owned guest for an action-triggered JavaScript modal. */
-  async beginDialog(owner: WebContents, id: unknown, expectedUrl: unknown,
+  async beginDialog(owner: DialogOwner, id: unknown, expectedUrl: unknown,
     approvedPromptOrigins?: unknown): Promise<string> {
     if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
       throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
@@ -224,7 +227,7 @@ export class DesktopBrowserGuests {
   }
 
   /** Accept a prompt only from a currently watched, owned guest frame. */
-  offerPrompt(guest: WebContents, sourceUrl: string | undefined,
+  offerPrompt(guest: DialogGuest, sourceUrl: string | undefined,
     respond: (answer: string | null | { readonly useDefault: true }) => void): void {
     if (typeof sourceUrl !== 'string') { respond(null); return }
     for (const [key, token] of this.activeDialogs) {
@@ -236,7 +239,7 @@ export class DesktopBrowserGuests {
   }
 
   /** Hold only top-level or approved same-origin guest alert/confirm shims. */
-  offerGuestDialog(guest: WebContents, sourceUrl: string | undefined, type: unknown,
+  offerGuestDialog(guest: DialogGuest, sourceUrl: string | undefined, type: unknown,
     respond: (answer: boolean | undefined) => void): void {
     if (typeof sourceUrl !== 'string' || (type !== 'alert' && type !== 'confirm')) {
       respond(type === 'confirm' ? false : undefined)
@@ -251,7 +254,7 @@ export class DesktopBrowserGuests {
   }
 
   /** Route Electron's held child-frame dialog only through the current approved action lease. */
-  private offerNativeDialog(guest: WebContents, sourceUrl: string, type: 'alert' | 'confirm' | 'prompt',
+  private offerNativeDialog(guest: DialogGuest, sourceUrl: string, type: 'alert' | 'confirm' | 'prompt',
     respond: (action: 'accept' | 'dismiss', text?: string) => void): boolean {
     for (const [key, token] of this.activeDialogs) {
       const lease = this.leases.get(key)
@@ -295,13 +298,13 @@ export class DesktopBrowserGuests {
   }
 
   /** Read only a modal handle and type; its page-provided text stays in the guest. */
-  getDialog(owner: WebContents, id: unknown, token: unknown): BrowserDialogInfo | null {
+  getDialog(owner: DialogOwner, id: unknown, token: unknown): BrowserDialogInfo | null {
     this.dialogToken(owner, id, token)
     return this.dialogLease.get(token as string)
   }
 
   /** Await a dialog without exposing raw CDP commands to the renderer. */
-  waitDialog(owner: WebContents, id: unknown, token: unknown, timeoutMs: unknown): Promise<BrowserDialogInfo | null> {
+  waitDialog(owner: DialogOwner, id: unknown, token: unknown, timeoutMs: unknown): Promise<BrowserDialogInfo | null> {
     this.dialogToken(owner, id, token)
     if (timeoutMs !== undefined && typeof timeoutMs !== 'number') {
       throw new Error('SIDEBAR_DIALOG_WAIT_UNAVAILABLE')
@@ -310,7 +313,7 @@ export class DesktopBrowserGuests {
   }
 
   /** Resolve one matching handle; a stale handle cannot control a newer dialog. */
-  async handleDialog(owner: WebContents, id: unknown, token: unknown, dialogId: unknown,
+  async handleDialog(owner: DialogOwner, id: unknown, token: unknown, dialogId: unknown,
     action: unknown, text: unknown): Promise<true | void> {
     const key = this.dialogToken(owner, id, token)
     if (typeof dialogId !== 'string' || !['accept', 'dismiss'].includes(action as string) ||
@@ -322,14 +325,14 @@ export class DesktopBrowserGuests {
   }
 
   /** Abandon a watch and dismiss any open modal so the guest is not left blocked. */
-  async finishDialog(owner: WebContents, id: unknown, token: unknown): Promise<void> {
+  async finishDialog(owner: DialogOwner, id: unknown, token: unknown): Promise<void> {
     const key = this.dialogToken(owner, id, token)
     this.activeDialogs.delete(key)
     this.activeNavigations.delete(token as string)
     await this.dialogLease.close(token as string)
   }
 
-  private dialogToken(owner: WebContents, id: unknown, token: unknown): DesktopBrowserLeaseId {
+  private dialogToken(owner: DialogOwner, id: unknown, token: unknown): DesktopBrowserLeaseId {
     if (typeof id !== 'string' || typeof token !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
     const key = id as DesktopBrowserLeaseId
     const lease = this.leases.get(key)
