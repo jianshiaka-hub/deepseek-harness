@@ -179,6 +179,10 @@ export async function locateBrowserForeignFrame(guest: FullPageCaptureGuest, exp
       throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
     }
   } else if (raw.texts !== undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  if (query.projection === 'attribute' && raw.rows.some((row: BrowserLocateResult['rows'][number]) =>
+    row.attribute !== null && (typeof row.attribute !== 'string' || row.attribute.length > 24000))) {
+    throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  }
   for (const step of path) {
     const again = await resolveForeignFrame(step.parent, step.selector)
     if (again.frame !== step.child || again.descriptor.src !== step.descriptor.src ||

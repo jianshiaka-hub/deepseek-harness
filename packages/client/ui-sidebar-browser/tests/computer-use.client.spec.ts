@@ -73,6 +73,40 @@ it('reads an ordered bounded list of textContent values from the selected docume
   }
 })
 
+it('reads a bounded nullable attribute from the selected document', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<a id="result" href="/result" aria-label="Result">Open</a>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const query = { method: 'locator' as const, value: '#result', exact: false,
+      projection: 'attribute' as const, attributeName: 'href' }
+    expect((await h.frame.locate?.(url, query))?.rows[0]?.attribute).toBe('/result')
+    expect((await h.frame.locate?.(url, { ...query, attributeName: 'data-missing' }))?.rows[0]?.attribute)
+      .toBeNull()
+    fixture.querySelector('#result')!.setAttribute('data-large', 'x'.repeat(24_001))
+    await expect(h.frame.locate?.(url, { ...query, attributeName: 'data-large' }))
+      .rejects.toThrow('SIDEBAR_ATTRIBUTE_TOO_LARGE')
+    await expect(h.frame.locate?.(url, { ...query, attributeName: 'bad name' }))
+      .rejects.toThrow('SIDEBAR_LOCATOR_UNAVAILABLE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
 it('bounds multi-step relative has filters to descendants of each candidate', async () => {
   const h = electronFixture()
   const fixture = document.createElement('div')

@@ -35,8 +35,11 @@ function validSidebarRelativeQuery(value: unknown, depth: number): boolean {
  * @returns Whether the request fits the bounded locator language.
  */
 export function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
-  return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'combine']) &&
-    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text', 'textContent', 'allTextContents'].includes(query.projection)) &&
+  return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'attributeName', 'combine']) &&
+    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text', 'textContent', 'allTextContents', 'attribute'].includes(query.projection)) &&
+    (query.projection === 'attribute'
+      ? typeof query.attributeName === 'string' && /^[^\u0000-\u0020\u007f"'<>/=]{1,256}$/u.test(query.attributeName)
+      : query.attributeName === undefined) &&
     (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
       query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Query arrives as Host RPC JSON, which may contain null.
@@ -398,6 +401,11 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
             const text = String(node.textContent ?? '');
             if (text.length > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
             return text;
+          })()} : {}),
+          ...(query.projection === 'attribute' ? {attribute:(() => {
+            const value = node.getAttribute(query.attributeName);
+            if (value !== null && value.length > 24000) throw new Error('SIDEBAR_ATTRIBUTE_TOO_LARGE');
+            return value;
           })()} : {})}];
       })();
       return {url:location.href,title:document.title.slice(0,512),count,rows,

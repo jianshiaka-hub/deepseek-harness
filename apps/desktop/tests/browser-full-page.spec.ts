@@ -167,7 +167,7 @@ describe('main-owned Sidebar full-page capture', () => {
     const foreignUrl = 'https://embedded.test/widget'
     const first = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',
       url: foreignUrl, name: 'first', framesInSubtree: [],
-      executeJavaScript: vi.fn(async () => ({ url: foreignUrl, title: 'Widget', count: 1,
+      executeJavaScript: vi.fn(async (): Promise<unknown> => ({ url: foreignUrl, title: 'Widget', count: 1,
         rows: [{ ref: 'd4-12345678:button:Open', role: 'button', name: 'Open' }] })) }
     const second = { ...first, frameTreeNodeId: 3, name: 'second',
       executeJavaScript: vi.fn(async () => { throw new Error('wrong foreign frame') }) }
@@ -192,6 +192,16 @@ describe('main-owned Sidebar full-page capture', () => {
     first.executeJavaScript.mockResolvedValueOnce({ url: foreignUrl, title: 'Widget', count: 2,
       rows: [], texts: ['Alpha'] })
     await expect(locateBrowserForeignFrame(h.guest, url, textQuery, approved))
+      .rejects.toThrow('SIDEBAR_FRAME_UNAVAILABLE')
+    const attributeQuery = { method: 'locator' as const, value: '#link', exact: false,
+      projection: 'attribute' as const, attributeName: 'href', frames: ['#first'] }
+    first.executeJavaScript.mockResolvedValueOnce({ url: foreignUrl, title: 'Widget', count: 1,
+      rows: [{ ref: 'd4-12345678:link:Open', role: 'link', name: 'Open', attribute: '/next' }] })
+    expect((await locateBrowserForeignFrame(h.guest, url, attributeQuery, approved)).rows[0]?.attribute)
+      .toBe('/next')
+    first.executeJavaScript.mockResolvedValueOnce({ url: foreignUrl, title: 'Widget', count: 1,
+      rows: [{ ref: 'd4-12345678:link:Open', role: 'link', name: 'Open', attribute: 'x'.repeat(24001) }] })
+    await expect(locateBrowserForeignFrame(h.guest, url, attributeQuery, approved))
       .rejects.toThrow('SIDEBAR_FRAME_UNAVAILABLE')
     second.name = 'first'
     await expect(locateBrowserForeignFrame(h.guest, url, query, approved))

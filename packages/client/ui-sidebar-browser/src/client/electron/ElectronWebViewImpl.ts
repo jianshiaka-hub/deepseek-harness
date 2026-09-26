@@ -267,6 +267,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
         throw new Error('SIDEBAR_TEXT_UNAVAILABLE')
       }
     } else if (value.texts !== undefined) throw new Error('SIDEBAR_TEXT_UNAVAILABLE')
+    if (query.projection === 'attribute' && value.rows.some((row: BrowserLocateResult['rows'][number]) =>
+      row.attribute !== null && (typeof row.attribute !== 'string' || row.attribute.length > 24000))) {
+      throw new Error('SIDEBAR_ATTRIBUTE_UNAVAILABLE')
+    }
     return value
   }
 
