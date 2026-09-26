@@ -171,7 +171,7 @@ it('translates only fixed input actions for the selected tab', async () => {
   expect(h.openTabs.getSnapshot()).toEqual([])
 })
 
-it('never reports an unmounted or unready tab as an available page', async () => {
+it('reports an empty selected Browser tab but not an unmounted tab', async () => {
   const h = await boot()
   h.openTabs.set([{ sessionId: 'other', tabId, kind: 'browser' }])
   h.selected.set({ sessionId: 'other', tabId })
@@ -180,7 +180,8 @@ it('never reports an unmounted or unready tab as an available page', async () =>
   h.selected.set({ sessionId: 'session', tabId })
   vi.mocked(h.face.snapshot).mockReturnValueOnce({ frame: emptyBrowserFrame(),
     restoreTarget: undefined, addressFailure: undefined, addressRevision: 0 })
-  expect(h.select()).toEqual({ sessionId: 'session', tabId, controllerAvailable: false })
+  expect(h.select()).toEqual({ sessionId: 'session', tabId, controllerAvailable: true,
+    observedUrl: 'about:blank' })
   vi.mocked(h.face.pendingDialogUrl).mockReturnValueOnce(url)
   expect(h.select()).toMatchObject({ observedUrl: url, controllerAvailable: true })
 })

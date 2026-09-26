@@ -81,9 +81,10 @@ export function apply(ctx: Context): void {
       const pendingDialogUrl = controllers.get(selected.sessionId)?.pendingDialogUrl(selected.tabId)
       return { sessionId: selected.sessionId, tabId: selected.tabId,
         controllerAvailable: pendingDialogUrl !== undefined ||
-          state?.address === 'observed' && !state.loading && state.target !== undefined,
+          state?.address === 'empty' || state?.address === 'observed' && !state.loading && state.target !== undefined,
         ...(pendingDialogUrl !== undefined ? { observedUrl: pendingDialogUrl }
-          : state?.address === 'observed' && state.target !== undefined ? { observedUrl: state.target.url } : {}),
+          : state?.address === 'observed' && state.target !== undefined ? { observedUrl: state.target.url }
+            : state?.address === 'empty' ? { observedUrl: 'about:blank' } : {}),
         ...(state?.target !== undefined ? { requestedUrl: state.target.url, title: state.target.title } : {}) }
     },
     (tab, command, stillSelected) => {
@@ -91,11 +92,15 @@ export function apply(ctx: Context): void {
         const destination = command.args.url
         if (destination === undefined || !stillSelected()) throw new Error('SIDEBAR_TAB_CREATION_UNAVAILABLE')
         const parsed = new URL(destination)
-        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.href !== destination ||
-          parsed.username || parsed.password) throw new Error('SIDEBAR_URL_UNAVAILABLE')
+        if (destination !== 'about:blank' && (!['http:', 'https:'].includes(parsed.protocol) ||
+          parsed.href !== destination || parsed.username || parsed.password)) {
+          throw new Error('SIDEBAR_URL_UNAVAILABLE')
+        }
         const before = new Set(openTabs.getSnapshot().filter(current =>
           current.sessionId === tab.sessionId).map(current => current.tabId))
-        ctx.sidebarRight.openTab('browser', { params: { url: destination }, revealIfOpened: false })
+        ctx.sidebarRight.openTab('browser', destination === 'about:blank'
+          ? { revealIfOpened: false }
+          : { params: { url: destination }, revealIfOpened: false })
         const added = openTabs.getSnapshot().filter(current =>
           current.sessionId === tab.sessionId && current.kind === 'browser' && !before.has(current.tabId))
         const created = added[0]
@@ -112,6 +117,9 @@ export function apply(ctx: Context): void {
             if (selected?.sessionId === tab.sessionId && selected.tabId === createdTabId) {
               const frame = controllers.get(tab.sessionId as BrowserBodyProps['sessionId'])
                 ?.snapshot(createdTabId)?.frame
+              if (destination === 'about:blank' && frame?.address === 'empty') {
+                return { url: 'about:blank', title: '', tabId: createdTabId, created: true as const }
+              }
               if (frame?.address === 'observed' && !frame.loading && frame.target !== undefined) {
                 return { url: frame.target.url, title: frame.target.title.slice(0, 512),
                   tabId: createdTabId, created: true as const }
@@ -125,6 +133,31 @@ export function apply(ctx: Context): void {
       const controller = controllers.get(tab.sessionId as BrowserBodyProps['sessionId'])
       if (controller === undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
       const tabId = tab.tabId as Parameters<BrowserInjected['inspect']>[0]
+      if (command.op === 'gotoBlank') {
+        const destination = command.args.url
+        if (destination === undefined || !stillSelected() ||
+          controller.snapshot(tabId)?.frame.address !== 'empty') throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+        const parsed = new URL(destination)
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.href !== destination ||
+          parsed.username || parsed.password) throw new Error('SIDEBAR_URL_UNAVAILABLE')
+        controller.loadUrl(tabId, destination)
+        return (async () => {
+          const deadline = Date.now() + 12_000
+          while (Date.now() < deadline) {
+            if (!stillSelected()) throw new Error('SIDEBAR_SELECTION_CHANGED')
+            const frame = controller.snapshot(tabId)?.frame
+            if (frame?.address === 'observed' && !frame.loading && frame.target !== undefined) {
+              return { url: frame.target.url, title: frame.target.title.slice(0, 512),
+                performed: true as const }
+            }
+            if (frame?.address === 'unknown' && !frame.loading || frame?.error !== undefined) {
+              throw new Error('SIDEBAR_NAVIGATION_FAILED')
+            }
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          throw new Error('SIDEBAR_NAVIGATION_TIMEOUT')
+        })()
+      }
       if (command.op === 'inspect') return controller.inspect(tabId, command.expectedUrl,
         command.args.approvedFrameOrigins)
       if (command.op === 'frameOrigins') return controller.frameOrigins(tabId, command.expectedUrl)

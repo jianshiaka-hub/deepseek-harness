@@ -42,7 +42,7 @@ interface Command {
   readonly id: string
   readonly sessionId: string
   readonly tabId: string
-  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'back' | 'forward' | 'close' | 'create' | 'dialog' | 'dialogAction'
+  readonly op: 'inspect' | 'frameOrigins' | 'locate' | 'screenshot' | 'click' | 'drag' | 'type' | 'paste' | 'setValue' | 'selectOption' | 'selectText' | 'secondary' | 'scroll' | 'key' | 'goto' | 'gotoBlank' | 'back' | 'forward' | 'close' | 'create' | 'dialog' | 'dialogAction'
   readonly expectedUrl: string
   readonly args: {
     readonly approvedOrigin: string
@@ -122,7 +122,8 @@ export class SidebarComputerUseReporter {
   private same(command: Command, tab: ComputerUseSelectedTab | null): tab is ComputerUseSelectedTab {
     return this.sameIdentity(command, tab) && tab.controllerAvailable &&
       tab.observedUrl === command.expectedUrl &&
-      new URL(command.expectedUrl).origin === command.args.approvedOrigin
+      (command.expectedUrl === 'about:blank' ? command.args.approvedOrigin === 'about:blank'
+        : new URL(command.expectedUrl).origin === command.args.approvedOrigin)
   }
 
   private async complete(command: Command): Promise<void> {
@@ -134,7 +135,7 @@ export class SidebarComputerUseReporter {
     let error = 'SIDEBAR_SELECTION_CHANGED'
     if (this.same(command, before)) {
       try {
-        value = await this.execute(before, command, () => ['goto', 'back', 'forward', 'dialogAction'].includes(command.op)
+        value = await this.execute(before, command, () => ['goto', 'gotoBlank', 'back', 'forward', 'dialogAction'].includes(command.op)
           ? this.selectionRevision === selectionRevision && this.sameIdentity(command, this.selected())
           : this.revision === revision && this.same(command, this.selected()))
         const after = this.selected()
@@ -144,7 +145,7 @@ export class SidebarComputerUseReporter {
           ok = after !== null && after.sessionId === command.sessionId &&
             after.tabId !== command.tabId && after.tabId === value.tabId &&
             after.controllerAvailable && after.observedUrl === value.url && value.created === true
-        } else if (['goto', 'back', 'forward', 'dialogAction'].includes(command.op)) {
+        } else if (['goto', 'gotoBlank', 'back', 'forward', 'dialogAction'].includes(command.op)) {
           ok = this.selectionRevision === selectionRevision && this.sameIdentity(command, after) &&
             after.controllerAvailable && after.observedUrl === value.url && value.performed === true
         } else if (command.op === 'inspect' || command.op === 'frameOrigins' || command.op === 'locate' || command.op === 'screenshot' || command.op === 'dialog') {

@@ -594,6 +594,20 @@ async function qualify() {
     assert.equal(created.approvals.filter(approval => approval.allowed).length,
       crossScroll.approvals.filter(approval => approval.allowed).length,
       'same-origin tab creation and read need no action confirmation')
+    const blankCreated = await control('/invoke', { sessionId,
+      code: `let blankTab = await b.tabs.new(); if (await blankTab.url() !== 'about:blank') throw Error('BLANK_URL_MISSING'); if ((await blankTab.getAXState({emit:false})) !== '') throw Error('BLANK_NOT_EMPTY'); let selectedBlank = await b.tabs.selected(); if (selectedBlank?.id !== blankTab.id) throw Error('BLANK_NOT_SELECTED'); return 'BLANK_' + blankTab.id;` })
+    await writeFile(join(root, 'computer-use-create-blank.json'),
+      JSON.stringify({ sessionId, tool: blankCreated }, null, 2))
+    assert.equal(blankCreated.result?.isError, false, JSON.stringify(blankCreated.result))
+    assert.equal(blankCreated.result?.value?.ok, true, JSON.stringify(blankCreated.result))
+    assert.match(blankCreated.result.value.result, /BLANK_sidebar:/)
+    const blankNavigated = await control('/invoke', { sessionId,
+      code: `let blankBefore = blankTab.id; await blankTab.goto(${JSON.stringify(createdUrl)}); if (blankTab.id !== blankBefore || (await b.tabs.selected())?.id !== blankBefore) throw Error('BLANK_ID_CHANGED'); return 'BLANK_NAVIGATED_' + (await blankTab.getAXState({emit:false})).includes('Isolated Computer Use');` })
+    await writeFile(join(root, 'computer-use-navigate-blank.json'),
+      JSON.stringify({ sessionId, tool: blankNavigated, createdUrl }, null, 2))
+    assert.equal(blankNavigated.result?.isError, false, JSON.stringify(blankNavigated.result))
+    assert.equal(blankNavigated.result?.value?.ok, true, JSON.stringify(blankNavigated.result))
+    assert.match(blankNavigated.result.value.result, /BLANK_NAVIGATED_true/)
     console.log('sidebar qualification: Computer Use read result written')
     app.exit(0)
   } catch (error) {
