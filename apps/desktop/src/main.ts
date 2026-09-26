@@ -764,6 +764,10 @@ async function main(): Promise<void> {
     browserGuests.offerPrompt(event.sender, event.senderFrame?.url,
       (answer) => { event.returnValue = answer })
   })
+  ipcMain.on(DESKTOP_IPC.browserGuestDialog, (event, type: unknown) => {
+    browserGuests.offerGuestDialog(event.sender, event.senderFrame?.url, type,
+      (answer) => { event.returnValue = answer })
+  })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*'] }, (details, callback) => {
     if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== mainWindow?.webContents.id) {

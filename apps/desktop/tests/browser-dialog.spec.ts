@@ -1,8 +1,44 @@
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
+import ts from 'typescript'
 import { BrowserDialogLease } from '../src/browser-dialog.ts'
 
 const url = 'https://example.test/page'
+
+it('guest preload forwards only fixed dialog kinds and keeps page text inside the guest', () => {
+  const source = readFileSync(new URL('../src/preload-browser-guest.ts', import.meta.url), 'utf8')
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022 } }).outputText
+  const page: Record<string, unknown> = {}
+  const sent: [string, ...unknown[]][] = []
+  let decision: unknown = false
+  const electron = {
+    contextBridge: {
+      exposeInMainWorld(name: string, value: unknown): void { page[name] = value },
+      executeInMainWorld({ func }: { readonly func: () => void }): void {
+        runInNewContext(`(${func.toString()})()`, { window: page })
+      },
+    },
+    ipcRenderer: { sendSync(channel: string, ...args: unknown[]): unknown {
+      sent.push([channel, ...args])
+      return decision
+    } },
+  }
+  runInNewContext(code, { require: (name: string) => name === 'electron' ? electron
+    : { DESKTOP_IPC: { browserGuestPrompt: 'prompt', browserGuestDialog: 'dialog' } }, exports: {} })
+  decision = true
+  expect((page.confirm as (message: string) => boolean)('Private choice')).toBe(true)
+  decision = false
+  expect((page.confirm as (message: string) => boolean)('Different private choice')).toBe(false)
+  const alert = page.alert as (message: string) => void
+  alert('Private notice')
+  decision = { useDefault: true }
+  expect((page.prompt as (message: string, fallback: string) => string)('Private prompt', 'seed'))
+    .toBe('seed')
+  expect(sent).toEqual([['dialog', 'confirm'], ['dialog', 'confirm'], ['dialog', 'alert'], ['prompt']])
+})
 
 function fixture() {
   const guestEvents = new EventEmitter()
@@ -39,6 +75,8 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.sendCommand).toHaveBeenCalledWith('Page.enable')
     const injection = h.sendCommand.mock.calls.find(([method]) => method === 'Page.addScriptToEvaluateOnNewDocument')
     expect(JSON.stringify(injection?.[1])).toContain('https://example.test')
+    expect(JSON.stringify(injection?.[1])).toContain('top.confirm(message)')
+    expect(JSON.stringify(injection?.[1])).toContain('top.alert(message)')
     expect(injection?.[1]).toHaveProperty('runImmediately', true)
     expect(lease.get(token)).toBeNull()
     const opened = lease.wait(token)
@@ -120,6 +158,47 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(reply).toHaveBeenCalledExactlyOnceWith('private answer')
     expect(h.sendCommand).not.toHaveBeenCalledWith('Page.handleJavaScriptDialog', expect.anything())
     expect(h.state.attached).toBe(false)
+  })
+
+  it('holds guest confirm and alert until their one-use handles are answered', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const confirmToken = await lease.begin(h.guest, url)
+    const confirmed = vi.fn()
+    expect(lease.offerGuestDialog(confirmToken, 'https://foreign.test/frame', 'confirm', confirmed)).toBe(false)
+    expect(lease.offerGuestDialog(confirmToken, url, 'confirm', confirmed)).toBe(true)
+    const confirm = lease.get(confirmToken)!
+    expect(confirm.type).toBe('confirm')
+    expect(JSON.stringify(confirm)).not.toContain('Private page text')
+    await lease.handle(confirmToken, confirm.id, 'accept')
+    expect(confirmed).toHaveBeenCalledExactlyOnceWith(true)
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Page.handleJavaScriptDialog', expect.anything())
+    const dismissToken = await lease.begin(h.guest, url)
+    const dismissed = vi.fn()
+    expect(lease.offerGuestDialog(dismissToken, url, 'confirm', dismissed)).toBe(true)
+    await lease.handle(dismissToken, lease.get(dismissToken)!.id, 'dismiss')
+    expect(dismissed).toHaveBeenCalledExactlyOnceWith(false)
+    const alertToken = await lease.begin(h.guest, url)
+    const alerted = vi.fn()
+    expect(lease.offerGuestDialog(alertToken, url, 'alert', alerted)).toBe(true)
+    await lease.handle(alertToken, lease.get(alertToken)!.id, 'accept')
+    expect(alerted).toHaveBeenCalledExactlyOnceWith(undefined)
+    expect(h.state.attached).toBe(false)
+  })
+
+  it('releases blocked guest dialogs on lease close without accepting them', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const confirmToken = await lease.begin(h.guest, url)
+    const confirmed = vi.fn()
+    expect(lease.offerGuestDialog(confirmToken, url, 'confirm', confirmed)).toBe(true)
+    await lease.close(confirmToken)
+    expect(confirmed).toHaveBeenCalledExactlyOnceWith(false)
+    const alertToken = await lease.begin(h.guest, url)
+    const alerted = vi.fn()
+    expect(lease.offerGuestDialog(alertToken, url, 'alert', alerted)).toBe(true)
+    await lease.close(alertToken)
+    expect(alerted).toHaveBeenCalledExactlyOnceWith(undefined)
   })
 
   it('binds a foreign prompt only to a current exact-origin grant', async () => {

@@ -39,6 +39,7 @@ interface ActiveDialogWatch {
   timer: ReturnType<typeof setTimeout> | undefined
   dialog: BrowserDialogInfo | undefined
   promptReply: ((value: PromptResponse) => void) | undefined
+  guestDialogReply: ((value: boolean | undefined) => void) | undefined
   framePromptScriptId: string | undefined
   closed: boolean
   detached: boolean
@@ -47,8 +48,7 @@ interface ActiveDialogWatch {
 const EMPTY_WATCH_MS = 30_000
 const OPEN_WATCH_MS = 300_000
 
-/** Electron does not implement native prompt() in subframes. Forward only a
- * frame from the watched origin to the already sandboxed top-frame shim. */
+/** Forward same-origin subframe dialogs to the sandboxed top-frame shims. */
 function sameOriginFramePromptScript(expectedUrl: string): string {
   const origin = JSON.stringify(new URL(expectedUrl).origin)
   return `(() => {
@@ -58,6 +58,8 @@ function sameOriginFramePromptScript(expectedUrl: string): string {
       window.prompt = function (message, defaultValue) {
         return top.prompt(message, defaultValue);
       };
+      window.confirm = function (message) { return top.confirm(message); };
+      window.alert = function (message) { top.alert(message); };
     } catch { /* Cross-origin frames retain Electron's unsupported prompt. */ }
   })();`
 }
@@ -109,14 +111,15 @@ export class BrowserDialogLease {
     const active: ActiveDialogWatch = {
       token, guest, expectedUrl, approvedPromptOrigins: new Set(approvedPromptOrigins ?? [topOrigin]),
       waiters: new Set(), timer: undefined, dialog: undefined,
-      promptReply: undefined,
+      promptReply: undefined, guestDialogReply: undefined,
       framePromptScriptId: undefined,
       closed: false, detached: false,
       onMessage: (_event, method, params): void => {
         if (method === 'Page.javascriptDialogClosed') {
           // Chromium can cancel a modal independently of the agent (notably in
           // child frames). Never leave its opaque handle actionable afterward.
-          if (active.dialog !== undefined && active.promptReply === undefined) {
+          if (active.dialog !== undefined && active.promptReply === undefined &&
+            active.guestDialogReply === undefined) {
             active.dialog = undefined
             if (active.timer !== undefined) clearTimeout(active.timer)
             active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, EMPTY_WATCH_MS)
@@ -208,10 +211,27 @@ export class BrowserDialogLease {
   offerPrompt(token: string, sourceUrl: string, respond: (value: PromptResponse) => void): boolean {
     const active = this.watches.get(token)
     if (active === undefined || active.closed || active.detached || active.dialog !== undefined ||
+      active.guestDialogReply !== undefined ||
       !this.validGuest(active) || !URL.canParse(sourceUrl) ||
       !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
     active.promptReply = respond
     active.dialog = { id: randomUUID(), type: 'prompt' }
+    if (active.timer !== undefined) clearTimeout(active.timer)
+    active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
+    for (const waiter of active.waiters) waiter(active.dialog)
+    active.waiters.clear()
+    return true
+  }
+
+  /** Hold a fixed alert/confirm from a source already approved for this lease. */
+  offerGuestDialog(token: string, sourceUrl: string, type: 'alert' | 'confirm',
+    respond: (value: boolean | undefined) => void): boolean {
+    const active = this.watches.get(token)
+    if (active === undefined || active.closed || active.detached || active.dialog !== undefined ||
+      active.promptReply !== undefined || !this.validGuest(active) || !URL.canParse(sourceUrl) ||
+      !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
+    active.guestDialogReply = respond
+    active.dialog = { id: randomUUID(), type }
     if (active.timer !== undefined) clearTimeout(active.timer)
     active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
     for (const waiter of active.waiters) waiter(active.dialog)
@@ -231,6 +251,14 @@ export class BrowserDialogLease {
       active.promptReply = undefined
       active.dialog = undefined
       try { reply(action === 'accept' ? text ?? { useDefault: true } : null) }
+      finally { await this.close(token) }
+      return
+    } else if (active.guestDialogReply !== undefined) {
+      const reply = active.guestDialogReply
+      const type = active.dialog.type
+      active.guestDialogReply = undefined
+      active.dialog = undefined
+      try { reply(type === 'confirm' ? action === 'accept' : undefined) }
       finally { await this.close(token) }
       return
     } else {
@@ -261,6 +289,14 @@ export class BrowserDialogLease {
     if (promptReply !== undefined) {
       active.dialog = undefined
       try { promptReply(null) } catch { /* The blocked guest may already be gone. */ }
+    }
+    const guestDialogReply = active.guestDialogReply
+    active.guestDialogReply = undefined
+    if (guestDialogReply !== undefined) {
+      const type = active.dialog?.type
+      active.dialog = undefined
+      try { guestDialogReply(type === 'confirm' ? false : undefined) }
+      catch { /* The blocked guest may already be gone. */ }
     }
     if (!active.detached && active.guest.debugger.isAttached()) {
       try {

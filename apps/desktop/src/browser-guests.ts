@@ -235,6 +235,21 @@ export class DesktopBrowserGuests {
     respond(null)
   }
 
+  /** Hold only top-level or approved same-origin guest alert/confirm shims. */
+  offerGuestDialog(guest: WebContents, sourceUrl: string | undefined, type: unknown,
+    respond: (answer: boolean | undefined) => void): void {
+    if (typeof sourceUrl !== 'string' || (type !== 'alert' && type !== 'confirm')) {
+      respond(type === 'confirm' ? false : undefined)
+      return
+    }
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerGuestDialog(token, sourceUrl, type, respond)) return
+    }
+    respond(type === 'confirm' ? false : undefined)
+  }
+
   /** One fixed, URL-bound navigation per active dialog watch; page code cannot replace the isolated-world method. */
   navigate(owner: WebContents, id: unknown, token: unknown, expectedUrl: unknown,
     method: unknown, destination: unknown): void {

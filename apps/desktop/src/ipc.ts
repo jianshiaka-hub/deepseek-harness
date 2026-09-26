@@ -41,6 +41,7 @@ export const DESKTOP_IPC = {
   browserDialogHandle: 'dsh-desktop:browser-dialog-handle',
   browserDialogEnd: 'dsh-desktop:browser-dialog-end',
   browserGuestPrompt: 'dsh-desktop:browser-guest-prompt',
+  browserGuestDialog: 'dsh-desktop:browser-guest-dialog',
   browserOpenRequested: 'dsh-desktop:browser-open-requested',
   directoryPick: 'dsh-desktop:directory-pick',
   localeBootstrap: 'dsh-desktop:locale-bootstrap',

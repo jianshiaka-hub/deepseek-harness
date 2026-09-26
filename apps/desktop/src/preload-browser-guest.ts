@@ -5,6 +5,8 @@ import { DESKTOP_IPC } from './ipc.ts'
 declare global {
   interface Window {
     __dshGuestPrompt: (message?: string, defaultValue?: string) => string | null
+    __dshGuestConfirm: (message?: string) => boolean
+    __dshGuestAlert: (message?: string) => void
   }
 }
 
@@ -19,6 +21,13 @@ contextBridge.exposeInMainWorld('__dshGuestPrompt', (_message?: unknown, default
   }
   return typeof result === 'string' && result.length <= 4000 ? result : null
 })
+contextBridge.exposeInMainWorld('__dshGuestConfirm', (_message?: unknown): boolean =>
+  ipcRenderer.sendSync(DESKTOP_IPC.browserGuestDialog, 'confirm') === true)
+contextBridge.exposeInMainWorld('__dshGuestAlert', (_message?: unknown): void => {
+  ipcRenderer.sendSync(DESKTOP_IPC.browserGuestDialog, 'alert')
+})
 contextBridge.executeInMainWorld({ func: () => {
   window.prompt = window.__dshGuestPrompt
+  window.confirm = window.__dshGuestConfirm
+  window.alert = window.__dshGuestAlert
 } })
