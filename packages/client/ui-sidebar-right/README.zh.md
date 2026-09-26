@@ -75,6 +75,8 @@ store 将每个 Session 的布局、标签身份、选中项、分栏比例、�
 
 `sidebarRight.openTabs` 发布所有已保存和已采用 Session 的打开标签元数据，并保持快照引用稳定。启动时读取布局 key，不挂载非当前内容、pin 文件或激活 Agent。已采用的 store 在标签成员变化时更新自己的元数据，永久清除的 scope 删除对应记录。其他窗口写入 storage 不会覆盖当前窗口的活动成员关系。provider 使用该清单恢复自己的资源生命周期。
 
+`sidebarRight.selected` 发布已挂载 Session 活动标签的身份；面板隐藏或席位释放时变为 `undefined`。它随已提交的焦点和布局变化更新；使用方仍须核对标签类型与页面状态。
+
 <a id="extension-seats"></a>
 ## 扩展席位
 

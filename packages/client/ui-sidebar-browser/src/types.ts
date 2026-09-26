@@ -16,12 +16,255 @@ export interface DesktopBrowserOpenRequest {
   readonly url: string
 }
 
+/** Bounded PNG of the selected guest; viewport is the captured coordinate extent. */
+export interface BrowserPageScreenshot {
+  readonly url: string
+  readonly title: string
+  readonly base64: string
+  readonly viewport: { readonly width: number; readonly height: number }
+}
+
+/** Only approved-current-tab source origins and a digest of the native frame tree. */
+export interface BrowserFrameAudit {
+  readonly origins: readonly string[]
+  readonly fingerprint: string
+}
+
+/** Bounded visible text from currently approved foreign child frames. */
+export interface BrowserForeignText {
+  readonly fingerprint: string
+  readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
+}
+
+/** A bounded string or serialized regular expression for approved locator matching. */
+export type BrowserTextPattern = string | { readonly __cu: 'regexp'; readonly source: string; readonly flags: string }
+
+/** One bounded selector and optional local filter over the approved document. */
+export interface BrowserLocateSelector {
+  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
+  readonly value: BrowserTextPattern
+  readonly name?: BrowserTextPattern
+  readonly description?: BrowserTextPattern
+  readonly exact: boolean
+  readonly includeHidden?: boolean
+  readonly checked?: boolean
+  readonly disabled?: boolean
+  readonly expanded?: boolean
+  readonly level?: number
+  readonly pressed?: boolean
+  readonly selected?: boolean
+  readonly filter?: {
+    readonly hasText?: BrowserTextPattern
+    readonly hasNotText?: BrowserTextPattern
+    readonly visible?: boolean
+    readonly has?: BrowserRelativeLocateQuery
+    readonly hasNot?: BrowserRelativeLocateQuery
+  }
+}
+
+/** Local filters within a relative locator; descendant queries are bounded by validation depth. */
+export interface BrowserRelativeLocateFilter {
+  readonly hasText?: BrowserTextPattern
+  readonly hasNotText?: BrowserTextPattern
+  readonly visible?: boolean
+  readonly has?: BrowserRelativeLocateQuery
+  readonly hasNot?: BrowserRelativeLocateQuery
+}
+
+/** One selector inside a candidate; no nested frame or positional selector. */
+export type BrowserRelativeLocateSelector = Omit<BrowserLocateSelector, 'filter'> & {
+  readonly filter?: BrowserRelativeLocateFilter
+}
+
+/** Up to three relative selector steps inside each candidate element. */
+export type BrowserRelativeLocateQuery = BrowserRelativeLocateSelector & {
+  readonly scopes?: readonly BrowserRelativeLocateSelector[]
+}
+
+/** A selector chain within the top document or explicit same-origin frames. */
+export interface BrowserLocateQuery extends BrowserLocateSelector {
+  readonly frames?: readonly string[]
+  readonly scopes?: readonly BrowserLocateSelector[]
+  readonly projection?: 'visible' | 'enabled' | 'checked' | 'text' | 'textContent' | 'allTextContents' | 'attribute'
+  readonly attributeName?: string
+  readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
+  readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
+}
+
+/** Count, at most one document-bound reference, or a bounded ordered text list. */
+export interface BrowserLocateResult {
+  readonly url: string
+  readonly title: string
+  readonly count: number
+  readonly texts?: readonly string[]
+  readonly rows: readonly {
+    readonly ref: string
+    readonly role: string
+    readonly name: string
+    readonly visible?: boolean
+    readonly enabled?: boolean
+    readonly checked?: boolean
+    readonly text?: string
+    readonly textContent?: string
+    readonly attribute?: string | null
+  }[]
+}
+
+/** Checked CSS-pixel target for a single approved foreign-frame element. */
+export interface BrowserForeignRefPoint {
+  readonly url: string
+  readonly title: string
+  readonly x: number
+  readonly y: number
+  readonly fingerprint: string
+  readonly origin: string
+}
+
+/** Bounded acknowledgement for preparing or verifying one foreign text field. */
+export interface BrowserForeignInputState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly hadText: boolean
+  readonly pasteConfirmed?: boolean
+}
+
+/** Bounded state for one fixed secondary action in an approved foreign frame. */
+export interface BrowserForeignSecondaryState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly expanded?: 'true' | 'false'
+}
+
+/** Opaque hit check for one approved coordinate along a native drag path. */
+export interface BrowserDragPoint {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly targetFingerprint: string
+}
+
+/** Bounded result of selecting options in one approved foreign select element. */
+export interface BrowserForeignOptionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly selected: readonly string[]
+}
+
+/** Bounded matcher for a single HTML option. */
+export interface BrowserForeignOptionSelector {
+  readonly value?: string
+  readonly label?: string
+  readonly index?: number
+}
+
+/** Bounded acknowledgement for a text selection inside one approved foreign frame. */
+export interface BrowserForeignSelectionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+}
+
+/** Exact text and optional context required for one bounded foreign selection. */
+export interface BrowserForeignSelectionSpec {
+  readonly text: string
+  readonly prefix?: string
+  readonly suffix?: string
+  readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
+}
+
+/** CSS-pixel rectangle within the selected page's capture extent. */
+export interface BrowserScreenshotClip {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/** Opaque handle and exact source origin for a guest modal; page text stays in the guest. */
+export interface BrowserJsDialog {
+  readonly id: string
+  readonly type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  readonly origin: string
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
   acquire(workspace: string): Promise<DesktopBrowserReservation>
   /** @param lease - the caller's reservation. @returns after its guest has been destroyed. */
   release(lease: DesktopBrowserLeaseId): Promise<void>
+  /** List current frame origins or verify a supplied exact-origin grant set. */
+  auditFrames(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins?: readonly string[]): Promise<BrowserFrameAudit>
+  /** Read bounded body text from exact-origin approved foreign frames. */
+  inspectForeignText(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[]): Promise<BrowserForeignText>
+  /** Query one explicitly selected foreign frame after checking every embedded source. */
+  locateForeign(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    query: BrowserLocateQuery, approvedOrigins: readonly string[]): Promise<BrowserLocateResult>
+  /** Revalidate one foreign element ref and resolve its visible point in the top guest viewport. */
+  foreignRefPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
+  /** Select/verify a foreign text field, or focus/check an editable or key target. */
+  foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    phase: 'select' | 'verify' | 'focus' | 'check' | 'keyFocus' | 'keyCheck' |
+      'pasteArm' | 'pasteCheck' | 'pasteResult' | 'pasteCleanup',
+    value?: string): Promise<BrowserForeignInputState>
+  /** Validate the target and prepare one fixed secondary action without exporting page data. */
+  foreignSecondaryState(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'): Promise<BrowserForeignSecondaryState>
+  /** Revalidate one viewport drag coordinate through the approved native frame tree. */
+  dragPoint(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    x: number, y: number, approvedOrigins: readonly string[]): Promise<BrowserDragPoint>
+  /** Select unique enabled options in one approved foreign select element. */
+  selectForeignOption(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    options: readonly BrowserForeignOptionSelector[]): Promise<BrowserForeignOptionResult>
+  /** Select one exact text match within an approved foreign element. */
+  selectForeignText(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    spec: BrowserForeignSelectionSpec): Promise<BrowserForeignSelectionResult>
+  /** Capture the current viewport with native frame-event and site checks. */
+  captureViewport(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
+  /** Capture the exact owned guest's full page after its caller checks the selected tab and frame origin. */
+  captureFullPage(lease: DesktopBrowserLeaseId, expectedUrl: string, clip?: BrowserScreenshotClip,
+    approvedOrigins?: readonly string[]): Promise<BrowserPageScreenshot>
+  /** Temporarily stage a confirmed paste for this exact guest URL. */
+  beginPaste(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    payload: { readonly text: string; readonly format: 'text' | 'md' | 'html'; readonly plainText?: string }): Promise<string>
+  /** Restore the prior clipboard, or leave a newer user copy intact. */
+  finishPaste(lease: DesktopBrowserLeaseId, token: string): Promise<{ readonly restored: boolean; readonly superseded: boolean }>
+  /** Intercept only a native drag from the exact owned guest for a short lease. */
+  beginDrag(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
+  /** Drop at a checked viewport point; omit it to cancel and release the native drag. */
+  finishDrag(lease: DesktopBrowserLeaseId, token: string,
+    point?: { readonly x: number; readonly y: number }): Promise<{ readonly dropped: boolean }>
+  /** Arm the exact guest before an approved action can open a JavaScript modal. */
+  beginDialog(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedPromptOrigins?: readonly string[]): Promise<string>
+  /** Dispatch one fixed navigation in the owned guest's isolated world after arming its dialog watch. */
+  navigate(lease: DesktopBrowserLeaseId, token: string, expectedUrl: string,
+    method: 'goto' | 'back' | 'forward', destination?: string): Promise<void>
+  /** Inspect the current modal without reading its page-provided message. */
+  getDialog(lease: DesktopBrowserLeaseId, token: string): Promise<BrowserJsDialog | null>
+  /** Wait briefly for a modal from the action that follows beginDialog. */
+  waitDialog(lease: DesktopBrowserLeaseId, token: string, timeoutMs?: number): Promise<BrowserJsDialog | null>
+  /** Confirm or dismiss one matching modal. */
+  handleDialog(lease: DesktopBrowserLeaseId, token: string, dialogId: string,
+    action: 'accept' | 'dismiss', text?: string): Promise<true | void>
+  /** Disarm and dismiss a still-open modal when the action or selection ends. */
+  finishDialog(lease: DesktopBrowserLeaseId, token: string): Promise<void>
   /** @param lease - originating guest. @param listener - approved URL consumer. @returns unsubscribe callback. */
   onOpenRequested(lease: DesktopBrowserLeaseId, listener: (url: string) => void): () => void
 }

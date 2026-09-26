@@ -4,6 +4,14 @@ import type { BrowserPresentation } from '../view/BrowserPresentation.ts'
 import css from '../view/Browser.module.css'
 
 /** The Electron tag API used by its navigation provider. */
+export interface CapturedPageImage {
+  isEmpty(): boolean
+  getSize(): { width: number; height: number }
+  crop(rect: { x: number; y: number; width: number; height: number }): CapturedPageImage
+  toDataURL(): string
+}
+
+/** Electron guest methods consumed by navigation, observation, screenshot and directed input. */
 export interface WebviewElement extends HTMLElement {
   loadURL(url: string): Promise<void>
   getURL(): string
@@ -15,6 +23,25 @@ export interface WebviewElement extends HTMLElement {
   goForward(): void
   reload(): void
   isLoading(): boolean
+  executeJavaScript(code: string): Promise<unknown>
+  sendInputEvent(event: {
+    type: 'mouseMove' | 'mouseDown' | 'mouseUp' | 'mouseWheel'
+    x: number
+    y: number
+    button?: 'left' | 'middle' | 'right'
+    clickCount?: number
+    deltaX?: number
+    deltaY?: number
+    hasPreciseScrollingDeltas?: boolean
+    canScroll?: boolean
+  } | {
+    type: 'keyDown' | 'char' | 'keyUp'
+    keyCode: string
+    modifiers?: Array<'shift' | 'control' | 'alt' | 'meta'>
+  }): Promise<void>
+  insertText(text: string): Promise<void>
+  paste(): void
+  capturePage(): Promise<CapturedPageImage>
 }
 
 /** Physical attachment notifications; hiding a retained Sidebar body emits neither. */

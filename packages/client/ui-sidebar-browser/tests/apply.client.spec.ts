@@ -54,8 +54,9 @@ async function boot(platform: ShortcutPlatform = 'macos', runtime: 'desktop' | '
     }),
   }
   const openTabs = createSnapshotStore<readonly { sessionId: string; tabId: TabId }[]>([])
+  const selected = createSnapshotStore<undefined>(undefined)
   const target = { sessionId: 'session', paneId: 'pane' }
-  const sidebar = { openTabs, commandTarget: vi.fn<() => typeof target | undefined>(() => target),
+  const sidebar = { openTabs, selected, commandTarget: vi.fn<() => typeof target | undefined>(() => target),
     openTabFromTarget: vi.fn() }
   const registry = new ShortcutRegistry(runtime, platform)
   ctx.provide('sidebarRight', sidebar as never)
@@ -75,6 +76,27 @@ describe('ui-sidebar-browser apply', () => {
     const bridge: DesktopBrowserBridge = {
       acquire,
       release: vi.fn(async () => {}),
+      auditFrames: vi.fn(async () => { throw new Error('not used in apply test') }),
+      inspectForeignText: vi.fn(async () => { throw new Error('not used in apply test') }),
+      locateForeign: vi.fn(async () => { throw new Error('not used in apply test') }),
+      foreignRefPoint: vi.fn(async () => { throw new Error('not used in apply test') }),
+      foreignInputState: vi.fn(async () => { throw new Error('not used in apply test') }),
+      foreignSecondaryState: vi.fn(async () => { throw new Error('not used in apply test') }),
+      dragPoint: vi.fn(async () => { throw new Error('not used in apply test') }),
+      selectForeignOption: vi.fn(async () => { throw new Error('not used in apply test') }),
+      selectForeignText: vi.fn(async () => { throw new Error('not used in apply test') }),
+      captureViewport: vi.fn(async () => { throw new Error('not used in apply test') }),
+      captureFullPage: vi.fn(async () => { throw new Error('not used in apply test') }),
+      beginPaste: vi.fn(async () => { throw new Error('not used in apply test') }),
+      finishPaste: vi.fn(async () => { throw new Error('not used in apply test') }),
+      beginDrag: vi.fn(async () => { throw new Error('not used in apply test') }),
+      finishDrag: vi.fn(async () => { throw new Error('not used in apply test') }),
+      beginDialog: vi.fn(async () => { throw new Error('not used in apply test') }),
+      navigate: vi.fn(async () => { throw new Error('not used in apply test') }),
+      getDialog: vi.fn(async () => { throw new Error('not used in apply test') }),
+      waitDialog: vi.fn(async () => { throw new Error('not used in apply test') }),
+      handleDialog: vi.fn(async () => { throw new Error('not used in apply test') }),
+      finishDialog: vi.fn(async () => { throw new Error('not used in apply test') }),
       onOpenRequested: vi.fn(() => () => {}),
     }
     vi.stubGlobal('dshDesktop', { protocolVersion, browser: bridge })

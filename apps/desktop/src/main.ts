@@ -373,7 +373,8 @@ async function main(): Promise<void> {
   const applicationUrl = `${SCHEME}://app/`
   let hostUrl: string | undefined
   let hostCookie: string | undefined
-  const browserGuests = new DesktopBrowserGuests(() => hostUrl)
+  const browserGuests = new DesktopBrowserGuests(() => hostUrl,
+    fileURLToPath(new URL('./preload-browser-guest.cjs', import.meta.url)))
   let injections: readonly unknown[] = []
   let welcomeBackend: DesktopWelcomeBackend | undefined
   let stopAccount: (() => void) | undefined
@@ -660,6 +661,112 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.browserRelease, (event, lease: unknown) => {
     assertProductSender(event)
     return browserGuests.release(event.sender, lease)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserAuditFrames, (event, lease: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.auditFrames(event.sender, lease, expectedUrl, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserInspectForeignText, (event, lease: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.inspectForeignText(event.sender, lease, expectedUrl, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserLocateForeign, (event, lease: unknown, expectedUrl: unknown,
+    query: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.locateForeign(event.sender, lease, expectedUrl, query, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserForeignRefPoint, (event, lease: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.foreignRefPoint(event.sender, lease, expectedUrl, ref, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserForeignInputState, (event, lease: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, phase: unknown, value: unknown) => {
+    assertProductSender(event)
+    return browserGuests.foreignInputState(event.sender, lease, expectedUrl, ref, approvedOrigins, phase, value)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserForeignSecondaryState, (event, lease: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, action: unknown) => {
+    assertProductSender(event)
+    return browserGuests.foreignSecondaryState(event.sender, lease, expectedUrl, ref, approvedOrigins, action)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDragPoint, (event, lease: unknown, expectedUrl: unknown,
+    x: unknown, y: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.dragPoint(event.sender, lease, expectedUrl, x, y, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserSelectForeignOption, (event, lease: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, options: unknown) => {
+    assertProductSender(event)
+    return browserGuests.selectForeignOption(event.sender, lease, expectedUrl, ref, approvedOrigins, options)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserSelectForeignText, (event, lease: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, spec: unknown) => {
+    assertProductSender(event)
+    return browserGuests.selectForeignText(event.sender, lease, expectedUrl, ref, approvedOrigins, spec)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserCaptureViewport, (event, lease: unknown, expectedUrl: unknown,
+    clip: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.captureViewport(event.sender, lease, expectedUrl, clip, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserCaptureFullPage, (event, lease: unknown, expectedUrl: unknown,
+    clip: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.captureFullPage(event.sender, lease, expectedUrl, clip, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserPasteBegin, (event, lease: unknown, expectedUrl: unknown, payload: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginPaste(event.sender, lease, expectedUrl, payload)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserPasteEnd, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.finishPaste(event.sender, lease, token)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDragBegin, (event, lease: unknown, expectedUrl: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginDrag(event.sender, lease, expectedUrl)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDragEnd, (event, lease: unknown, token: unknown, point: unknown) => {
+    assertProductSender(event)
+    return browserGuests.finishDrag(event.sender, lease, token, point)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDialogBegin, (event, lease: unknown, expectedUrl: unknown,
+    approvedPromptOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginDialog(event.sender, lease, expectedUrl, approvedPromptOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserNavigate, (event, lease: unknown, token: unknown,
+    expectedUrl: unknown, method: unknown, destination: unknown) => {
+    assertProductSender(event)
+    browserGuests.navigate(event.sender, lease, token, expectedUrl, method, destination)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDialogGet, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.getDialog(event.sender, lease, token)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDialogWait, (event, lease: unknown, token: unknown, timeoutMs: unknown) => {
+    assertProductSender(event)
+    return browserGuests.waitDialog(event.sender, lease, token, timeoutMs)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDialogHandle, (event, lease: unknown, token: unknown,
+    dialogId: unknown, action: unknown, text: unknown) => {
+    assertProductSender(event)
+    return browserGuests.handleDialog(event.sender, lease, token, dialogId, action, text)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDialogEnd, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.finishDialog(event.sender, lease, token)
+  })
+  ipcMain.on(DESKTOP_IPC.browserGuestPrompt, (event) => {
+    browserGuests.offerPrompt(event.sender, event.senderFrame?.url,
+      (answer) => { event.returnValue = answer })
+  })
+  ipcMain.on(DESKTOP_IPC.browserGuestDialog, (event, type: unknown) => {
+    browserGuests.offerGuestDialog(event.sender, event.senderFrame?.url, type,
+      (answer) => { event.returnValue = answer })
   })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*'] }, (details, callback) => {

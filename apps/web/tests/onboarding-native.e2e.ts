@@ -64,7 +64,7 @@ describe.skipIf(MODE === 'record').each([false, true])('web e2e: native credenti
         await accountMenu.click()
         const menu = page.getByRole('menu')
         await menu.waitFor()
-        expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['设置', '联系我们', '登录'])
+        expect(await menu.getByRole('menuitem').allTextContents()).toEqual(['设置⌘,', '联系我们', '登录'])
         const menuBox = (await menu.boundingBox())!
         expect(Math.abs(menuBox.width - 124)).toBeLessThan(1)
         expect(Math.abs(menuBox.height - 128)).toBeLessThan(1)

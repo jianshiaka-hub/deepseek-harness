@@ -73,6 +73,7 @@ export async function connectDesktopWelcome(
   }
   const localePreference = (namespaces: unknown[]): string | null => {
     const locale: unknown = namespaces.find((item: unknown) => record(item) && item.ns === 'locale')
+    if (locale === undefined) return null
     if (!record(locale) || !record(locale.value)
       || (locale.value.preference !== undefined && typeof locale.value.preference !== 'string')) {
       throw new Error('desktop welcome: invalid locale preference')

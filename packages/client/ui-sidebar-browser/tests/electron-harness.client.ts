@@ -1,6 +1,8 @@
 /** Native webview events controlled by each test; presentation and navigation stay real. */
 import { vi } from 'vitest'
-import type { DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
+import type { BrowserForeignText, BrowserForeignInputState, BrowserForeignRefPoint,
+  BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId,
+  DesktopBrowserReservation } from '../src/types.ts'
 import type { BrowserTabState } from '../src/client/browser/BrowserPersistence.ts'
 import { createElectronPage } from '../src/client/electron/pages.ts'
 import { ElectronWebviewPresentation } from '../src/client/electron/ElectronWebviewPresentation.ts'
@@ -11,9 +13,57 @@ let sequence = 0
 export function electronFixture(initial?: BrowserTabState) {
   const opens = new Set<(url: string) => void>()
   const reservation: DesktopBrowserReservation = { lease: `lease-${++sequence}` as DesktopBrowserLeaseId, partition: 'partition' }
+  const frameAudit = { origins: ['https://example.test'], fingerprint: 'frame-1' }
   const bridge = {
     acquire: vi.fn(async (_workspace: string) => reservation),
     release: vi.fn(async (_lease: DesktopBrowserLeaseId) => {}),
+    auditFrames: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, approved?: readonly string[]) => {
+      if (approved !== undefined && frameAudit.origins.some(origin => !approved.includes(origin))) {
+        throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+      }
+      return { origins: [...frameAudit.origins], fingerprint: frameAudit.fingerprint }
+    }),
+    inspectForeignText: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string): Promise<BrowserForeignText> => ({
+      fingerprint: frameAudit.fingerprint, frames: [],
+    })),
+    locateForeign: vi.fn(async () => { throw new Error('not used in this harness') }),
+    foreignRefPoint: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, _ref: string,
+      _approved: readonly string[]): Promise<BrowserForeignRefPoint> => {
+      throw new Error('not used in this harness')
+    }),
+    foreignInputState: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, _ref: string,
+      _approved: readonly string[], _phase: Parameters<DesktopBrowserBridge['foreignInputState']>[4],
+      _value?: string): Promise<BrowserForeignInputState> => {
+      throw new Error('not used in this harness')
+    }),
+    foreignSecondaryState: vi.fn(async () => { throw new Error('not used in this harness') }),
+    dragPoint: vi.fn(async () => { throw new Error('not used in this harness') }),
+    selectForeignOption: vi.fn(async () => { throw new Error('not used in this harness') }),
+    selectForeignText: vi.fn(async () => { throw new Error('not used in this harness') }),
+    captureViewport: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
+      url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+      viewport: { width: 1, height: 1 },
+    })),
+    captureFullPage: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => ({
+      url: 'https://example.test/', title: 'Example', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+      viewport: { width: 1, height: 1 },
+    })),
+    beginPaste: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string,
+      _payload: { readonly text: string; readonly format: 'text' | 'md' | 'html'; readonly plainText?: string }) => 'paste-lease'),
+    finishPaste: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string) =>
+      ({ restored: true, superseded: false })),
+    beginDrag: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => 'drag-lease'),
+    finishDrag: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string,
+      _point?: { readonly x: number; readonly y: number }) => ({ dropped: true })),
+    beginDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string) => 'dialog-lease'),
+    navigate: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string, _url: string,
+      _method: 'goto' | 'back' | 'forward', _destination?: string) => {}),
+    getDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string): Promise<BrowserJsDialog | null> => null),
+    waitDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string,
+      _timeoutMs?: number): Promise<BrowserJsDialog | null> => null),
+    handleDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string, _dialogId: string,
+      _action: 'accept' | 'dismiss', _text?: string) => {}),
+    finishDialog: vi.fn(async (_lease: DesktopBrowserLeaseId, _token: string) => {}),
     onOpenRequested: vi.fn((_lease: DesktopBrowserLeaseId, listener: (url: string) => void) => {
       opens.add(listener)
       return () => { opens.delete(listener) }
@@ -48,7 +98,7 @@ export function electronFixture(initial?: BrowserTabState) {
   host.id = `electron-fixture-${sequence}`
   document.body.append(host)
   return {
-    ...page, presentation, bridge, workspace, persist, openRequested, opens, guests, host, reservation,
+    ...page, presentation, bridge, frameAudit, workspace, persist, openRequested, opens, guests, host, reservation,
     mount: () => presentation.mount(host.id),
     async guest() {
       await vi.waitFor(() => { expectGuest() })

@@ -85,13 +85,14 @@ export function createSidebarRightController(tabs: SidebarRightTabRegistry, pin:
         const surface = store.getSnapshot().bySession[sessionId]
         inventory.update(sessionId, Object.values(surface?.layout.tabs ?? {}))
         if (surface !== undefined) controller.tabDomain.sync(sessionId, surface.layout)
+        controller.publishSelection()
       }
       const adoption: Adoption = { store, unsubscribe: store.subscribe(sync) }
       adopted.set(sessionId, adoption)
       sync()
       return () => {
         adoption.unsubscribe()
-        if (adopted.get(sessionId) === adoption) adopted.delete(sessionId)
+        if (adopted.get(sessionId) === adoption) { adopted.delete(sessionId); controller.publishSelection() }
       }
     },
   }
@@ -168,6 +169,8 @@ export interface ISidebarRight {
    * publishes its binding from a passive effect of the same commit.
    */
   readonly mounted: ObservableSnapshot<SessionId | undefined>
+  /** Currently selected right-Sidebar tab of the mounted session, withdrawn on focus or Session change. */
+  readonly selected: ObservableSnapshot<{ readonly sessionId: SessionId; readonly tabId: TabId } | undefined>
   /**
    * Open a resource: claim it, place it, reveal the column, record the navigation.
    *
@@ -239,6 +242,8 @@ export class SidebarRightController implements ISidebarRight {
   private readonly mountedSession = createSnapshotStore<SessionId | undefined>(undefined)
   /** The mounted seat's session; see {@link ISidebarRight.mounted}. */
   readonly mounted: ObservableSnapshot<SessionId | undefined> = this.mountedSession
+  private readonly selectedTab = createSnapshotStore<{ readonly sessionId: SessionId; readonly tabId: TabId } | undefined>(undefined)
+  readonly selected: ObservableSnapshot<{ readonly sessionId: SessionId; readonly tabId: TabId } | undefined> = this.selectedTab
   private binding: SidebarRightBinding | undefined
   private readonly closeHandlers = new Map<string, SidebarRightCloseHandler>()
 
@@ -295,13 +300,27 @@ export class SidebarRightController implements ISidebarRight {
   bind(binding: SidebarRightBinding): () => void {
     this.binding = binding
     this.publishMounted()
+    this.publishSelection()
     return () => {
       // A newer seat may already have taken over; only the binding that is
       // still ours may be cleared.
       if (this.binding !== binding) return
       this.binding = undefined
       this.publishMounted()
+      this.publishSelection()
     }
+  }
+
+  /** Publish only the selected tab of the mounted Session after each layout commit. */
+  publishSelection(): void {
+    const sessionId = this.binding?.sessionId
+    const layout = sessionId === undefined ? undefined : this.adopted.get(sessionId)?.store.getSnapshot().bySession[sessionId]?.layout
+    const pane = layout === undefined ? undefined : getPane(layout, layout.activePaneId)
+    const tabId = pane?.activeTabId
+    const next = sessionId !== undefined && tabId !== undefined && (layout?.expanded || pane?.host === 'float')
+      ? { sessionId, tabId } : undefined
+    const previous = this.selectedTab.getSnapshot()
+    if (previous?.sessionId !== next?.sessionId || previous?.tabId !== next?.tabId) this.selectedTab.set(next)
   }
 
   /** Publish the mounted session only when it changes; a republished binding for the same session is silent. */

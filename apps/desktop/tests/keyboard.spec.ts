@@ -28,10 +28,13 @@ const overlays = await vi.hoisted(async () => {
   }
   return { Window }
 })
-vi.mock('electron', () => ({ ipcMain: ipc, BrowserWindow: overlays.Window, app: { isPackaged: true }, session: { fromPartition: () => ({
-  setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn(), setDevicePermissionHandler: vi.fn(),
-  setDisplayMediaRequestHandler: vi.fn(), on: vi.fn(), webRequest: { onBeforeRequest: vi.fn() },
-}) } }))
+vi.mock('electron', () => ({ ipcMain: ipc, BrowserWindow: overlays.Window,
+  clipboard: { read: vi.fn(async () => []), write: vi.fn(async () => {}), clear: vi.fn() },
+  ClipboardItem: vi.fn(),
+  app: { isPackaged: true }, session: { fromPartition: () => ({
+    setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn(), setDevicePermissionHandler: vi.fn(),
+    setDisplayMediaRequestHandler: vi.fn(), on: vi.fn(), webRequest: { onBeforeRequest: vi.fn() },
+  }) } }))
 const { installDesktopShortcuts } = await import('../src/keyboard.ts')
 const { DesktopBrowserGuests } = await import('../src/browser-guests.ts')
 const { DesktopUpdateOverlays } = await import('../src/update-overlay.ts')
@@ -198,7 +201,7 @@ it.each([false, true])('blocks approved browser guest input across update overla
     { id: 'page.close', defaults: { 'desktop:macos': { code: 'KeyA', secondCode: 'KeyB', modifiers: [] } } },
     { id: 'sidebar.left.toggle', defaults: desktopDefaults({ code: 'KeyK', modifiers: ['primary'] }) },
   ])
-  const guests = new DesktopBrowserGuests(() => undefined) as GuestsFixture
+  const guests = new DesktopBrowserGuests(() => undefined, '/test/sidebar-guest-preload.cjs') as GuestsFixture
   guests.bind(f.window, (guest, name) => f.keyboard.attachGuest(f.window, guest, name))
   const reservation = guests.acquire(f.contents, 'session:test')
   const { frame, guest } = browserGuest(reservation)
@@ -711,7 +714,7 @@ it.each(['macos', 'windows', 'linux'] as const)('routes approved %s browser gues
   const f = await fixture(platform)
   const snapshot = await f.call<ShortcutConfigSnapshot>(DESKTOP_IPC.shortcutsGet,
     [{ id: 'browser.new', defaults: desktopDefaults({ code: 'KeyT', modifiers: ['primary'] }) }])
-  const guests = new DesktopBrowserGuests(() => undefined) as GuestsFixture
+  const guests = new DesktopBrowserGuests(() => undefined, '/test/sidebar-guest-preload.cjs') as GuestsFixture
   const attach = vi.fn((guest: ContentsFixture, name: DesktopBrowserLeaseId) => f.keyboard.attachGuest(f.window, guest, name))
   guests.bind(f.window, attach)
   const reservation = guests.acquire(f.contents, 'session:test')

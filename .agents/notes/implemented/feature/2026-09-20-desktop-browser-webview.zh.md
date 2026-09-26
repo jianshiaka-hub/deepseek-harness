@@ -38,7 +38,7 @@ Browser 分别拥有 Host 与 Client 编译程序。Desktop 和 Host 聚合配�
 
 guest Session 不注册应用协议，也不继承应用的认证请求转发。权限请求与检查、设备访问、屏幕捕获、下载、原生弹窗与 HTTP 认证提示全部拒绝。通过检查且不带 POST body 的直接 HTTP(S) 弹窗请求，通过活动租约路由为新 Sidebar Tab；脚本操作空白窗口和 POST 弹窗流程仍不支持。导航接受不带内嵌凭据的 HTTP(S)；请求过滤拒绝本地文件、特权协议与已知 DSH Host 地址，包括常见 loopback 别名。这不是通用的私有网络或 DNS rebinding 防火墙。
 
-Desktop toolbar 没有关闭 sandbox 的开关。实现不增加远程调试端口或 browser-use 集成。未来的自动化提供方需要经过认证、限定 target 的 broker，而不是访问全部应用 target。把 target/生命周期句柄与导航命令分开的方式，与 Playwright 的 Android WebView 和 Page 对象区分相同；设备级输入属于另一项职责。
+Desktop toolbar 没有关闭 sandbox 的开关或远程调试端口。后续接入的选中标签 Computer Use broker 把操作绑定到已认证的所有者、精确 guest 和短期租约，而不开放全部应用 target；其[子 frame 离页重试](2026-09-26-sidebar-beforeunload-replay.zh.md)也会在继续前复核原文档。把 target/生命周期句柄与导航命令分开的方式，与 Playwright 的 Android WebView 和 Page 对象区分相同；设备级输入属于另一项职责。
 
 ## Alternatives considered
 
