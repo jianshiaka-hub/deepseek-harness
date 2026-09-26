@@ -1,6 +1,8 @@
 /** Native webview events controlled by each test; presentation and navigation stay real. */
 import { vi } from 'vitest'
-import type { BrowserForeignText, BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId, DesktopBrowserReservation } from '../src/types.ts'
+import type { BrowserForeignText, BrowserForeignInputState, BrowserForeignRefPoint,
+  BrowserJsDialog, DesktopBrowserBridge, DesktopBrowserLeaseId,
+  DesktopBrowserReservation } from '../src/types.ts'
 import type { BrowserTabState } from '../src/client/browser/BrowserPersistence.ts'
 import { createElectronPage } from '../src/client/electron/pages.ts'
 import { ElectronWebviewPresentation } from '../src/client/electron/ElectronWebviewPresentation.ts'
@@ -25,8 +27,15 @@ export function electronFixture(initial?: BrowserTabState) {
       fingerprint: frameAudit.fingerprint, frames: [],
     })),
     locateForeign: vi.fn(async () => { throw new Error('not used in this harness') }),
-    foreignRefPoint: vi.fn(async () => { throw new Error('not used in this harness') }),
-    foreignInputState: vi.fn(async () => { throw new Error('not used in this harness') }),
+    foreignRefPoint: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, _ref: string,
+      _approved: readonly string[]): Promise<BrowserForeignRefPoint> => {
+      throw new Error('not used in this harness')
+    }),
+    foreignInputState: vi.fn(async (_lease: DesktopBrowserLeaseId, _url: string, _ref: string,
+      _approved: readonly string[], _phase: Parameters<DesktopBrowserBridge['foreignInputState']>[4],
+      _value?: string): Promise<BrowserForeignInputState> => {
+      throw new Error('not used in this harness')
+    }),
     foreignSecondaryState: vi.fn(async () => { throw new Error('not used in this harness') }),
     dragPoint: vi.fn(async () => { throw new Error('not used in this harness') }),
     selectForeignOption: vi.fn(async () => { throw new Error('not used in this harness') }),

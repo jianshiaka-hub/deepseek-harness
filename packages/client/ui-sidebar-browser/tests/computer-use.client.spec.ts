@@ -615,6 +615,50 @@ it('pastes rich content through the leased clipboard and restores it after a tru
   }
 })
 
+it('routes approved foreign paste through a native target click and a frame-bound receipt', async () => {
+  const h = electronFixture()
+  const url = 'https://example.test/'
+  const origin = 'https://foreign.test'
+  const approvedFrameOrigins = ['https://example.test', origin]
+  const ref = `x42-${'a'.repeat(64)}/d3-12345678:textbox:Foreign%20name`
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    h.frameAudit.origins.push(origin)
+    const sent = vi.fn(async (_event: { readonly type: string }) => {})
+    const paste = vi.fn()
+    Object.assign(guest.element, { sendInputEvent: sent, paste })
+    h.bridge.foreignInputState.mockImplementation(async (_lease, _url, _ref, _approved, phase) => ({
+      url, title: 'Example', origin, fingerprint: 'frame-1', hadText: false,
+      pasteConfirmed: phase === 'pasteResult',
+    }))
+    h.bridge.foreignRefPoint.mockResolvedValue({ url, title: 'Example', x: 32, y: 44,
+      origin, fingerprint: 'frame-1' })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const result = await h.frame.action?.(url, { op: 'paste', ref, text: 'Foreign text',
+      format: 'text', approvedFrameOrigins })
+    expect(result).toMatchObject({ performed: true, clipboardRestored: true, clipboardSuperseded: false })
+    expect(sent.mock.calls.map(([event]) => event.type)).toEqual(['mouseDown', 'mouseUp'])
+    expect(paste).toHaveBeenCalledTimes(1)
+    expect(h.bridge.foreignInputState.mock.calls.map(([, , , , phase]) => phase))
+      .toEqual(['pasteArm', 'pasteCheck', 'pasteCheck', 'pasteResult', 'pasteCleanup'])
+    expect(h.bridge.beginPaste).toHaveBeenCalledWith(h.reservation.lease, url,
+      { text: 'Foreign text', format: 'text' })
+    expect(h.bridge.finishPaste).toHaveBeenCalledWith(h.reservation.lease, 'paste-lease')
+
+    h.bridge.beginPaste.mockRejectedValueOnce(new Error('SIDEBAR_CLIPBOARD_CHANGED'))
+    await expect(h.frame.action?.(url, { op: 'paste', ref, text: 'Again',
+      format: 'text', approvedFrameOrigins })).rejects.toThrow('SIDEBAR_CLIPBOARD_CHANGED')
+    expect(h.bridge.foreignInputState.mock.calls.at(-1)?.[4]).toBe('pasteCleanup')
+    expect(h.bridge.finishPaste).toHaveBeenCalledTimes(1)
+  } finally { await h.dispose() }
+})
+
 it('drags along a checked native pointer path and releases the button if selection changes', async () => {
   const h = electronFixture()
   const source = document.createElement('button')

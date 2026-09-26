@@ -54,6 +54,7 @@ export type BrowserDomAction =
     readonly ref?: string
     readonly text: string
     readonly format: 'text' | 'md' | 'html'
+    readonly approvedFrameOrigins?: readonly string[]
   }
   | {
     readonly op: 'drag'

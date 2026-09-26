@@ -112,6 +112,7 @@ export interface BrowserForeignInputState {
   readonly origin: string
   readonly fingerprint: string
   readonly hadText: boolean
+  readonly pasteConfirmed?: boolean
 }
 
 /** Bounded state for one fixed secondary action in an approved foreign frame. */
@@ -199,7 +200,8 @@ export interface DesktopBrowserBridge {
   /** Select/verify a foreign text field, or focus/check an editable or key target. */
   foreignInputState(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
-    phase: 'select' | 'verify' | 'focus' | 'check' | 'keyFocus' | 'keyCheck',
+    phase: 'select' | 'verify' | 'focus' | 'check' | 'keyFocus' | 'keyCheck' |
+      'pasteArm' | 'pasteCheck' | 'pasteResult' | 'pasteCleanup',
     value?: string): Promise<BrowserForeignInputState>
   /** Validate the target and prepare one fixed secondary action without exporting page data. */
   foreignSecondaryState(lease: DesktopBrowserLeaseId, expectedUrl: string,

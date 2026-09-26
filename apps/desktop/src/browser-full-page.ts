@@ -267,6 +267,9 @@ export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, exp
 export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, expectedUrl: string,
   input: unknown, approvedOrigins: readonly string[], phase: unknown,
   value: unknown): Promise<BrowserForeignInputState> {
+  if (['pasteArm', 'pasteCheck', 'pasteResult', 'pasteCleanup'].includes(phase as string)) {
+    return stateForBrowserForeignPaste(guest, expectedUrl, input, approvedOrigins, phase, value)
+  }
   if (!['select', 'verify', 'focus', 'check', 'keyFocus', 'keyCheck'].includes(phase as string) ||
     (phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) ||
     (phase !== 'verify' && value !== undefined)) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
@@ -314,6 +317,81 @@ export async function stateForBrowserForeignInput(guest: FullPageCaptureGuest, e
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, hadText: raw.hadText }
+}
+
+async function stateForBrowserForeignPaste(guest: FullPageCaptureGuest, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], phase: unknown,
+  receipt: unknown): Promise<BrowserForeignInputState> {
+  if (!['pasteArm', 'pasteCheck', 'pasteResult', 'pasteCleanup'].includes(phase as string) ||
+    typeof receipt !== 'string' || !/^[a-f0-9-]{36}$/iu.test(receipt)) {
+    throw new Error('SIDEBAR_PASTE_UNAVAILABLE')
+  }
+  const match = /^x\d{1,10}-([a-f0-9]{64})\/(.+)$/iu.exec(input as string)
+  const id = Number(/^x(\d{1,10})-/iu.exec(input as string)?.[1])
+  const audit = auditBrowserFrames(guest, expectedUrl, approvedOrigins)
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === id)
+  if (match === null || match[1] !== audit.fingerprint || leaf?.executeJavaScript === undefined ||
+    !approvedOrigins.includes(leaf.origin)) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const point = ['pasteArm', 'pasteCheck'].includes(phase as string)
+    ? await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins) : undefined
+  if (point !== undefined && point.origin !== leaf.origin) throw new Error('SIDEBAR_STALE_REF')
+  const key = `__dsh_cu_foreign_paste_${receipt.replaceAll('-', '')}`
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const key = ${JSON.stringify(key)};
+    const phase = ${JSON.stringify(phase)};
+    let state = window[key];
+    if (phase === 'pasteCleanup') {
+      if (state) {
+        document.removeEventListener('paste',state.onPaste,true);
+        document.removeEventListener('input',state.onInput,true);
+        delete window[key];
+      }
+      return {hadText:false,pasteConfirmed:false};
+    }
+    const resolved = phase === 'pasteArm' || phase === 'pasteCheck'
+      ? sidebarResolveRef(${JSON.stringify(match[2])}) : null;
+    const node = resolved?.node ?? state?.node;
+    if (!node || resolved?.frames.length > 0 || !node.isConnected ||
+      ('disabled' in node && node.disabled) || ('readOnly' in node && node.readOnly) ||
+      node.tagName === 'INPUT' && !['text','search','email','url','tel','number'].includes(node.type) ||
+      !['INPUT','TEXTAREA'].includes(node.tagName) && !node.isContentEditable) {
+      throw new Error('SIDEBAR_PASTE_TARGET_UNAVAILABLE');
+    }
+    if (phase === 'pasteArm') {
+      if (state) throw new Error('SIDEBAR_PASTE_TARGET_UNAVAILABLE');
+      node.focus();
+      if (document.activeElement !== node) throw new Error('SIDEBAR_PASTE_TARGET_UNAVAILABLE');
+      state = {node,armed:false,paste:false,input:false};
+      state.onPaste = event => {
+        if (state.armed && event.isTrusted && node.isConnected &&
+          (event.target === node || node.contains(event.target))) state.paste = true;
+      };
+      state.onInput = event => {
+        if (state.armed && state.paste && event.isTrusted && node.isConnected &&
+          (event.target === node || node.contains(event.target))) state.input = true;
+      };
+      Object.defineProperty(window,key,{value:state,configurable:true});
+      document.addEventListener('paste',state.onPaste,true);
+      document.addEventListener('input',state.onInput,true);
+    } else {
+      if (!state || state.node !== node || document.activeElement !== node) {
+        throw new Error('SIDEBAR_PASTE_TARGET_UNAVAILABLE');
+      }
+      if (phase === 'pasteCheck') state.armed = true;
+    }
+    return {hadText:(typeof node.value === 'string' ? node.value : node.textContent || '').length > 0,
+      pasteConfirmed:state?.paste === true && state?.input === true};
+  })()`)
+  if (!record(raw) || typeof raw.hadText !== 'boolean' || typeof raw.pasteConfirmed !== 'boolean' ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== audit.fingerprint) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: leaf.origin,
+    fingerprint: audit.fingerprint, hadText: raw.hadText, pasteConfirmed: raw.pasteConfirmed }
 }
 
 /** Inspect or focus one fixed secondary target in an approved foreign frame. */

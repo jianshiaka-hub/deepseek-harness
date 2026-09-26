@@ -228,7 +228,9 @@ export function apply(ctx: Context): void {
         }
         return controller.action(tabId, command.expectedUrl,
           { op: 'paste', ...(command.args.ref === undefined ? {} : { ref: command.args.ref }),
-            text: command.args.text, format: command.args.format }, stillSelected)
+            text: command.args.text, format: command.args.format,
+            ...(command.args.approvedFrameOrigins === undefined ? {}
+              : { approvedFrameOrigins: command.args.approvedFrameOrigins }) }, stillSelected)
       }
       if (command.op === 'type') {
         if (command.args.text === undefined) throw new Error('SIDEBAR_INPUT_UNAVAILABLE')

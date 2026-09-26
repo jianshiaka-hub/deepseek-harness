@@ -363,6 +363,72 @@ async function qualify() {
     assert.ok(foreignFrame, 'approved foreign frame should still exist')
     assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
       'Ada', 'native input should update the actual foreign document')
+    await foreignFrame.executeJavaScript(`(() => {
+      const input = document.querySelector('input[aria-label="Foreign name"]');
+      input.setSelectionRange(input.value.length,input.value.length);
+      window.__foreignPasteEvents = [];
+      document.addEventListener('paste',event => {
+        if (event.target === input) window.__foreignPasteEvents.push(['paste',event.isTrusted]);
+      },true);
+      document.addEventListener('input',event => {
+        if (event.target === input) window.__foreignPasteEvents.push(['input',event.isTrusted]);
+      },true);
+    })()`)
+    const crossPaste = await control('/invoke', { sessionId,
+      code: `let pasted = await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).paste('!'); if (pasted.clipboardRestored !== true || pasted.clipboardSuperseded !== false) throw Error('FOREIGN_CLIPBOARD_NOT_RESTORED'); return 'FOREIGN_PASTE_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-paste-state.json'), JSON.stringify({
+      value: await foreignFrame.executeJavaScript(`({
+        value:document.querySelector('input[aria-label="Foreign name"]').value,
+        active:document.activeElement?.getAttribute('aria-label'),
+        events:window.__foreignPasteEvents
+      })`),
+      host: { windowFocused: window.isFocused(), guestFocused: foreignGuest.isFocused(),
+        focusedFrameUrl: foreignGuest.focusedFrame?.url ?? null },
+    }, null, 2))
+    await writeFile(join(root, 'computer-use-cross-origin-paste.json'),
+      JSON.stringify({ sessionId, tool: crossPaste }, null, 2))
+    assert.equal(crossPaste.result?.isError, false, JSON.stringify(crossPaste.result))
+    assert.equal(crossPaste.result?.value?.ok, true, JSON.stringify(crossPaste.result))
+    assert.match(crossPaste.result.value.result, /FOREIGN_PASTE_OK/)
+    assert.equal(crossPaste.approvals.filter(approval => approval.allowed).length,
+      crossFill.approvals.filter(approval => approval.allowed).length + 1,
+      'Foreign-frame paste needs one-use action confirmation')
+    assert.deepEqual(await foreignFrame.executeJavaScript(`({
+      value:document.querySelector('input[aria-label="Foreign name"]').value,
+      events:window.__foreignPasteEvents
+    })`), { value: 'Ada!', events: [['paste',true],['input',true]] })
+    await foreignFrame.executeJavaScript(`(() => {
+      const editor = document.createElement('div');
+      editor.contentEditable = 'true';
+      editor.setAttribute('role','textbox');
+      editor.setAttribute('aria-label','Foreign editor');
+      editor.style.width = '180px'; editor.style.height = '40px';
+      document.body.prepend(editor);
+      window.__foreignRichEvents = [];
+      document.addEventListener('paste',event => {
+        if (event.target === editor) window.__foreignRichEvents.push(['paste',event.isTrusted]);
+      },true);
+      document.addEventListener('input',event => {
+        if (event.target === editor) window.__foreignRichEvents.push(['input',event.isTrusted]);
+      },true);
+    })()`)
+    const crossRichPaste = await control('/invoke', { sessionId,
+      code: `let rich = await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign editor',exact:true}).paste('<b>Rich</b><i> text</i>',{format:'html'}); if (rich.clipboardRestored !== true || rich.clipboardSuperseded !== false) throw Error('FOREIGN_RICH_CLIPBOARD_NOT_RESTORED'); return 'FOREIGN_RICH_PASTE_OK';` })
+    await writeFile(join(root, 'computer-use-cross-origin-rich-paste.json'),
+      JSON.stringify({ sessionId, tool: crossRichPaste }, null, 2))
+    assert.equal(crossRichPaste.result?.value?.ok, true, JSON.stringify(crossRichPaste.result))
+    assert.match(crossRichPaste.result.value.result, /FOREIGN_RICH_PASTE_OK/)
+    assert.equal(crossRichPaste.approvals.filter(approval => approval.allowed).length,
+      crossPaste.approvals.filter(approval => approval.allowed).length + 1)
+    const richState = await foreignFrame.executeJavaScript(`({
+      html:document.querySelector('[aria-label="Foreign editor"]').innerHTML,
+      events:window.__foreignRichEvents
+    })`)
+    await writeFile(join(root, 'computer-use-cross-origin-rich-paste-state.json'),
+      JSON.stringify(richState, null, 2))
+    assert.match(richState.html, /<b>Rich<\/b><i> text<\/i>/)
+    assert.deepEqual(richState.events, [['paste',true],['input',true]])
+    await foreignFrame.executeJavaScript(`document.querySelector('[aria-label="Foreign editor"]').remove()`)
     const crossClear = await control('/invoke', { sessionId,
       code: `await t.playwright.frameLocator('#foreign').getByRole('textbox',{name:'Foreign name',exact:true}).fill(''); return 'FOREIGN_CLEAR_OK';` })
     await writeFile(join(root, 'computer-use-cross-origin-clear.json'),
@@ -371,7 +437,7 @@ async function qualify() {
     assert.equal(crossClear.result?.value?.ok, true, JSON.stringify(crossClear.result))
     assert.match(crossClear.result.value.result, /FOREIGN_CLEAR_OK/)
     assert.equal(crossClear.approvals.filter(approval => approval.allowed).length,
-      crossFill.approvals.filter(approval => approval.allowed).length + 1,
+      crossRichPaste.approvals.filter(approval => approval.allowed).length + 1,
       'Foreign-frame clear needs one-use action confirmation')
     assert.equal(await foreignFrame.executeJavaScript('document.querySelector("input[aria-label=\\"Foreign name\\"]").value'),
       '', 'native Backspace should clear the actual foreign document')

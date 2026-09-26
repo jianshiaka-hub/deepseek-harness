@@ -783,6 +783,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
 
   private async nativePaste(element: WebviewElement, expectedUrl: string,
     action: Extract<BrowserDomAction, { readonly op: 'paste' }>, stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    if (action.ref?.startsWith('x')) return this.nativeForeignPaste(element, expectedUrl, action, stillSelected)
     const lease = this.lease
     if (lease === undefined || !['text', 'md', 'html'].includes(action.format) ||
       new TextEncoder().encode(action.text).length > 1_000_000) throw new Error('SIDEBAR_PASTE_UNAVAILABLE')
@@ -879,6 +880,89 @@ export class ElectronWebViewImpl implements BrowserFrame {
       }
     }
     return { url: expectedUrl, title: focused.title, performed: true, clipboardRestored, clipboardSuperseded }
+  }
+
+  private async nativeForeignPaste(element: WebviewElement, expectedUrl: string,
+    action: Extract<BrowserDomAction, { readonly op: 'paste' }>,
+    stillSelected: () => boolean): Promise<BrowserDomActionResult> {
+    const lease = this.lease
+    const approved = action.approvedFrameOrigins
+    const ref = action.ref
+    if (lease === undefined || approved === undefined || ref === undefined ||
+      !['text', 'md', 'html'].includes(action.format) ||
+      new TextEncoder().encode(action.text).length > 1_000_000 ||
+      !this.inputStillSelected(element, expectedUrl, stillSelected)) {
+      throw new Error('SIDEBAR_PASTE_UNAVAILABLE')
+    }
+    const receipt = randomUUID()
+    const payload = action.format === 'html' ? (() => {
+      const template = document.createElement('template')
+      template.innerHTML = action.text
+      return { text: action.text, format: action.format, plainText: template.content.textContent }
+    })() : { text: action.text, format: action.format }
+    let token: string | undefined
+    let clipboardRestored = false
+    let clipboardSuperseded = false
+    let title = ''
+    let mouseDown = false
+    let point: Awaited<ReturnType<DesktopBrowserBridge['foreignRefPoint']>> | undefined
+    try {
+      const armed = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'pasteArm', receipt)
+      title = armed.title
+      if (armed.url !== expectedUrl || !approved.includes(armed.origin) ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+        throw new Error('SIDEBAR_SELECTION_CHANGED')
+      }
+      point = await this.bridge.foreignRefPoint(lease, expectedUrl, ref, approved)
+      if (point.origin !== armed.origin || point.fingerprint !== armed.fingerprint ||
+        !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+        throw new Error('SIDEBAR_SELECTION_CHANGED')
+      }
+      mouseDown = true
+      await element.sendInputEvent({ type: 'mouseDown', button: 'left', x: point.x, y: point.y, clickCount: 1 })
+      await element.sendInputEvent({ type: 'mouseUp', button: 'left', x: point.x, y: point.y, clickCount: 1 })
+      mouseDown = false
+      const verify = async (): Promise<void> => {
+        const state = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved, 'pasteCheck', receipt)
+        if (state.fingerprint !== armed.fingerprint || state.origin !== armed.origin ||
+          !this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease ||
+          (await this.bridge.auditFrames(lease, expectedUrl, approved)).fingerprint !== armed.fingerprint) {
+          throw new Error('SIDEBAR_SELECTION_CHANGED')
+        }
+      }
+      await verify()
+      token = await this.bridge.beginPaste(lease, expectedUrl, payload)
+      await verify()
+      element.paste()
+      let confirmed = false
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if (!this.inputStillSelected(element, expectedUrl, stillSelected) || this.lease !== lease) {
+          throw new Error('SIDEBAR_SELECTION_CHANGED')
+        }
+        const state = await this.bridge.foreignInputState(lease, expectedUrl, ref, approved,
+          'pasteResult', receipt)
+        if (state.fingerprint !== armed.fingerprint || state.origin !== armed.origin) {
+          throw new Error('SIDEBAR_NAVIGATED')
+        }
+        if (state.pasteConfirmed === true) { confirmed = true; break }
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      if (!confirmed) throw new Error('SIDEBAR_PASTE_NOT_CONFIRMED')
+    } finally {
+      if (mouseDown && point !== undefined) {
+        await element.sendInputEvent({ type: 'mouseUp', button: 'left', x: point.x, y: point.y,
+          clickCount: 1 }).catch(() => {})
+      }
+      await this.bridge.foreignInputState(lease, expectedUrl, ref, approved,
+        'pasteCleanup', receipt).catch(() => {})
+      if (token !== undefined) {
+        const restored = await this.bridge.finishPaste(lease, token)
+        clipboardRestored = restored.restored
+        clipboardSuperseded = restored.superseded
+      }
+    }
+    return { url: expectedUrl, title, performed: true,
+      clipboardRestored, clipboardSuperseded }
   }
 
   private async nativeSetValue(element: WebviewElement, expectedUrl: string,
