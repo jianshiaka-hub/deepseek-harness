@@ -36,7 +36,7 @@ function validSidebarRelativeQuery(value: unknown, depth: number): boolean {
  */
 export function validSidebarLocateQuery(query: BrowserLocateQuery, allowCombine = true): boolean {
   return validSidebarLocateSelector(query, ['frames', 'scopes', 'position', 'projection', 'combine']) &&
-    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text'].includes(query.projection)) &&
+    (query.projection === undefined || ['visible', 'enabled', 'checked', 'text', 'textContent'].includes(query.projection)) &&
     (query.scopes === undefined || Array.isArray(query.scopes) && query.scopes.length >= 1 &&
       query.scopes.length <= 2 && query.scopes.every(scope => validSidebarLocateSelector(scope))) &&
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- Query arrives as Host RPC JSON, which may contain null.
@@ -377,6 +377,11 @@ export function sidebarLocateCode(expectedUrl: string, query: BrowserLocateQuery
           ...(query.projection === 'text' ? {text:(() => {
             if (!isVisible(node)) throw new Error('SIDEBAR_TEXT_NOT_VISIBLE');
             const text = String(node.innerText ?? '');
+            if (text.length > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+            return text;
+          })()} : {}),
+          ...(query.projection === 'textContent' ? {textContent:(() => {
+            const text = String(node.textContent ?? '');
             if (text.length > 24000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
             return text;
           })()} : {})}];

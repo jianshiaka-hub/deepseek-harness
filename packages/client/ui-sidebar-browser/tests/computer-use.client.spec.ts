@@ -9,6 +9,35 @@ function runGuestScript(code: string, context: Record<string, unknown>): unknown
   return result
 }
 
+it('reads bounded textContent from one selected element including hidden descendants', async () => {
+  const h = electronFixture()
+  const fixture = document.createElement('div')
+  fixture.innerHTML = '<div id="result" aria-label="Result">Visible<span hidden> Hidden</span></div>'
+  document.body.append(fixture)
+  const url = 'https://example.test/'
+  try {
+    h.mount()
+    h.frame.loadUrl({ kind: 'https', url, title: 'Example' })
+    const guest = await h.guest()
+    guest.state.url = url
+    guest.state.title = 'Example'
+    guest.state.loading = false
+    Object.assign(guest.element, { executeJavaScript: async (code: string) => runGuestScript(code, {
+      location: { href: url, origin: 'https://example.test' }, document, URL,
+    }) })
+    guest.emit('dom-ready')
+    guest.emit('did-navigate')
+    const query = { method: 'locator' as const, value: '#result', exact: false,
+      projection: 'textContent' as const }
+    expect((await h.frame.locate?.(url, query))?.rows[0]?.textContent).toBe('Visible Hidden')
+    fixture.querySelector('#result')!.textContent = 'x'.repeat(24_001)
+    await expect(h.frame.locate?.(url, query)).rejects.toThrow('SIDEBAR_TEXT_TOO_LARGE')
+  } finally {
+    await h.dispose()
+    fixture.remove()
+  }
+})
+
 it('bounds multi-step relative has filters to descendants of each candidate', async () => {
   const h = electronFixture()
   const fixture = document.createElement('div')
