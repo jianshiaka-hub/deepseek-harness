@@ -62,6 +62,22 @@ it('forwards an approved prompt answer to only the retained guest dialog lease',
   } finally { action.mockRestore(); await h.dispose() }
 })
 
+it('drops a dialog handle that Chromium already closed before the agent accepts it', async () => {
+  const { h } = await readyFixture()
+  const dialog: BrowserJsDialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm' }
+  const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise(() => {}))
+  h.bridge.waitDialog.mockResolvedValue(dialog)
+  h.bridge.getDialog.mockResolvedValue(null)
+  try {
+    await expect(h.frame.actionWithDialog?.(url, { op: 'click', x: 20, y: 20 }, () => true))
+      .resolves.toMatchObject({ dialog })
+    await expect(h.frame.dialog?.(url, () => true))
+      .resolves.toEqual({ url, title: 'Example', dialog: null })
+    expect(h.bridge.finishDialog).toHaveBeenCalledWith(h.reservation.lease, 'dialog-lease')
+    expect(h.frame.pendingDialogUrl?.()).toBeUndefined()
+  } finally { action.mockRestore(); await h.dispose() }
+})
+
 it('keeps a bounded dialog watch when native click completes before a frame prompt arrives', async () => {
   const { h } = await readyFixture()
   const dialog: BrowserJsDialog = { id: 'e2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }

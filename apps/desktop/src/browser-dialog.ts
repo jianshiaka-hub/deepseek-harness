@@ -99,6 +99,16 @@ export class BrowserDialogLease {
       framePromptScriptId: undefined,
       closed: false, detached: false,
       onMessage: (_event, method, params): void => {
+        if (method === 'Page.javascriptDialogClosed') {
+          // Chromium can cancel a modal independently of the agent (notably in
+          // child frames). Never leave its opaque handle actionable afterward.
+          if (active.dialog !== undefined && active.promptReply === undefined) {
+            active.dialog = undefined
+            if (active.timer !== undefined) clearTimeout(active.timer)
+            active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, EMPTY_WATCH_MS)
+          }
+          return
+        }
         if (method !== 'Page.javascriptDialogOpening' || !record(params)) return
         // A subframe from another website has no matching site grant. Dismiss it
         // without exposing its type or text through this exact-origin lease.
@@ -140,6 +150,7 @@ export class BrowserDialogLease {
       this.assertValidStart(active, invalidated)
       this.watches.set(token, active)
       if (active.dialog === undefined) {
+        if (active.timer !== undefined) clearTimeout(active.timer)
         active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, EMPTY_WATCH_MS)
       }
       return token

@@ -391,7 +391,11 @@ export class ElectronWebViewImpl implements BrowserFrame {
     let dialog: BrowserJsDialog | null
     try { dialog = await this.bridge.getDialog(active.lease, active.token) }
     catch (error) { await this.cancelDialog(); throw error }
-    if (dialog?.id !== active.info.id) throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    if (dialog === null) {
+      await this.cancelDialog()
+      return { url: expectedUrl, title: element.getTitle().slice(0, 512), dialog: null }
+    }
+    if (dialog.id !== active.info.id) throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
     return { url: expectedUrl, title: element.getTitle().slice(0, 512), dialog }
   }
 

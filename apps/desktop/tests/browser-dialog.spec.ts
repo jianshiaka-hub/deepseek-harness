@@ -75,6 +75,21 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.state.attached).toBe(false)
   })
 
+  it('invalidates an opaque handle when Chromium closes its dialog before agent confirmation', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const token = await lease.begin(h.guest, url)
+    h.open('confirm')
+    const dialog = lease.get(token)
+    expect(dialog?.type).toBe('confirm')
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { result: false })
+    expect(lease.get(token)).toBeNull()
+    await expect(lease.handle(token, dialog!.id, 'accept'))
+      .rejects.toThrow('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    await lease.close(token)
+    expect(h.state.attached).toBe(false)
+  })
+
   it('captures beforeunload after a navigation enters loading but before its URL commits', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()
