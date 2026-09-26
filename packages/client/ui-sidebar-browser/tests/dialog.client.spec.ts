@@ -21,7 +21,7 @@ async function readyFixture() {
 
 it('returns an opaque dialog while native input is pending, then resumes after accept', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'a2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm' }
+  const dialog: BrowserJsDialog = { id: 'a2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm', origin: 'https://example.test' }
   let resolveAction: ((result: { url: string; title: string; performed: true }) => void) | undefined
   const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise((resolve) => { resolveAction = resolve }))
   h.bridge.waitDialog.mockResolvedValue(dialog)
@@ -44,7 +44,7 @@ it('returns an opaque dialog while native input is pending, then resumes after a
 
 it('forwards an approved prompt answer to only the retained guest dialog lease', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'd2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }
+  const dialog: BrowserJsDialog = { id: 'd2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt', origin: 'https://example.test' }
   let resolveAction: ((result: { url: string; title: string; performed: true }) => void) | undefined
   const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise((resolve) => { resolveAction = resolve }))
   h.bridge.waitDialog.mockResolvedValue(dialog)
@@ -64,7 +64,7 @@ it('forwards an approved prompt answer to only the retained guest dialog lease',
 
 it('forwards exact approved frame origins when a foreign element can open a prompt', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'aa281017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }
+  const dialog: BrowserJsDialog = { id: 'aa281017-5baf-422a-830d-843c43f67ed4', type: 'prompt', origin: 'https://foreign.test' }
   const origins = ['https://example.test', 'https://foreign.test']
   const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise(() => {}))
   h.bridge.waitDialog.mockResolvedValue(dialog)
@@ -78,7 +78,7 @@ it('forwards exact approved frame origins when a foreign element can open a prom
 
 it('drops a dialog handle that Chromium already closed before the agent accepts it', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm' }
+  const dialog: BrowserJsDialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'confirm', origin: 'https://example.test' }
   const action = vi.spyOn(h.frame, 'action').mockImplementation(() => new Promise(() => {}))
   h.bridge.waitDialog.mockResolvedValue(dialog)
   h.bridge.getDialog.mockResolvedValue(null)
@@ -94,7 +94,7 @@ it('drops a dialog handle that Chromium already closed before the agent accepts 
 
 it('keeps a bounded dialog watch when native click completes before a frame prompt arrives', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'e2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt' }
+  const dialog: BrowserJsDialog = { id: 'e2f81017-5baf-422a-830d-843c43f67ed4', type: 'prompt', origin: 'https://example.test' }
   const action = vi.spyOn(h.frame, 'action').mockResolvedValue({ url, title: 'Example', performed: true })
   h.bridge.getDialog.mockResolvedValueOnce(null).mockResolvedValue(dialog)
   h.bridge.waitDialog.mockImplementation(async (_lease, _token, timeoutMs) =>
@@ -113,7 +113,7 @@ it('keeps a bounded dialog watch when native click completes before a frame prom
 
 it('releases the guest debugger when selection changes before a modal is resolved', async () => {
   const { h } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'b2f81017-5baf-422a-830d-843c43f67ed4', type: 'alert' }
+  const dialog: BrowserJsDialog = { id: 'b2f81017-5baf-422a-830d-843c43f67ed4', type: 'alert', origin: 'https://example.test' }
   let retainedGuard: (() => boolean) | undefined
   const action = vi.spyOn(h.frame, 'action').mockImplementation((_url, _action, guard) => {
     retainedGuard = guard
@@ -135,7 +135,7 @@ it('releases the guest debugger when selection changes before a modal is resolve
 
 it('holds an accepted beforeunload result until the destination finishes loading', async () => {
   const { h, guest } = await readyFixture()
-  const dialog: BrowserJsDialog = { id: 'c2f81017-5baf-422a-830d-843c43f67ed4', type: 'beforeunload' }
+  const dialog: BrowserJsDialog = { id: 'c2f81017-5baf-422a-830d-843c43f67ed4', type: 'beforeunload', origin: 'https://example.test' }
   const next = 'https://other.test/next'
   const action = vi.spyOn(h.frame, 'action').mockResolvedValue({ url, title: 'Example', performed: true })
   h.bridge.getDialog.mockResolvedValue(dialog)

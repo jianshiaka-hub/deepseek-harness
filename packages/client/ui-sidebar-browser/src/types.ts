@@ -188,10 +188,11 @@ export interface BrowserScreenshotClip {
   readonly height: number
 }
 
-/** Opaque handle for a modal opened by this guest; page text stays in the guest. */
+/** Opaque handle and exact source origin for a guest modal; page text stays in the guest. */
 export interface BrowserJsDialog {
   readonly id: string
   readonly type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  readonly origin: string
 }
 
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */

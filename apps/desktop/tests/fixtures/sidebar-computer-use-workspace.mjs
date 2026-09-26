@@ -7,7 +7,8 @@ import { app, BrowserWindow, webContents } from 'electron'
 
 const root = process.env.DSH_SIDEBAR_CU_ROOT
 const pageUrl = process.env.DSH_SIDEBAR_CU_PAGE_URL
-assert.ok(root && pageUrl)
+const destinationUrl = process.env.DSH_SIDEBAR_CU_DESTINATION_URL
+assert.ok(root && pageUrl && destinationUrl)
 const application = join(root, 'app')
 app.setAppPath(application)
 app.setPath('userData', join(root, 'electron'))
@@ -909,6 +910,24 @@ async function qualify() {
         actionFinishedMs: Date.now() - foreignLeaveStart,
         guestPreferences: foreignGuest.getLastWebPreferences(),
         activated: true, frameUrl: foreignFrame.url }, null, 2))
+    await foreignFrame.executeJavaScript(`(() => {
+      addEventListener('beforeunload', event => { event.preventDefault(); event.returnValue = ''; });
+      const button = document.createElement('button');
+      button.textContent = 'Approved foreign destination';
+      button.addEventListener('click', () => { location.assign(${JSON.stringify(destinationUrl)}); });
+      document.body.prepend(button);
+    })()`)
+    const foreignCrossSiteAccepted = await control('/invoke', { sessionId,
+      code: `await t.playwright.frameLocator('#foreign').getByRole('button',{name:'Approved foreign destination',exact:true}).click(); let leave = await t.getJsDialog(); if(leave?.type !== 'beforeunload') throw Error('FOREIGN_CROSS_SITE_DIALOG_MISSING'); await leave.accept(); return 'FOREIGN_CROSS_SITE_ACCEPTED';` })
+    assert.equal(foreignCrossSiteAccepted.result?.value?.ok, true, JSON.stringify(foreignCrossSiteAccepted.result))
+    assert.match(foreignCrossSiteAccepted.result.value.result, /FOREIGN_CROSS_SITE_ACCEPTED/)
+    assert.equal(foreignFrame.url, destinationUrl, 'accepted dialog must reach the already approved destination site')
+    assert.equal(foreignCrossSiteAccepted.approvals.filter(approval => approval.allowed).length,
+      foreignLeaveAccepted.approvals.filter(approval => approval.allowed).length + 2,
+      'Foreign cross-site click and dialog acceptance each need one-use confirmation')
+    await writeFile(join(root, 'computer-use-cross-origin-beforeunload-approved-destination.json'),
+      JSON.stringify({ sessionId, tool: foreignCrossSiteAccepted, frameUrl: foreignFrame.url,
+        destinationUrl }, null, 2))
     const createdUrl = new URL('/created', pageUrl).href
     const created = await control('/invoke', { sessionId,
       code: `let createdTab = await b.tabs.new(${JSON.stringify(createdUrl)}); let activeTab = await b.tabs.selected(); if (activeTab?.id !== createdTab.id) throw Error('CREATED_TAB_NOT_SELECTED'); let oldUnavailable = false; try { await t.getAXState({emit:false}); } catch { oldUnavailable = true; } if (!oldUnavailable) throw Error('OLD_TAB_STILL_EXPOSED'); return 'CREATED_' + createdTab.id + '_' + (await createdTab.getAXState({emit:false})).includes('Isolated Computer Use');` })
@@ -918,7 +937,7 @@ async function qualify() {
     assert.equal(created.result?.value?.ok, true, JSON.stringify(created.result))
     assert.match(created.result.value.result, /CREATED_sidebar:.*_true/)
     assert.equal(created.approvals.filter(approval => approval.allowed).length,
-      foreignLeaveAccepted.approvals.filter(approval => approval.allowed).length,
+      foreignCrossSiteAccepted.approvals.filter(approval => approval.allowed).length,
       'same-origin tab creation and read need no action confirmation')
     const blankCreated = await control('/invoke', { sessionId,
       code: `let blankTab = await b.tabs.new(); if (await blankTab.url() !== 'about:blank') throw Error('BLANK_URL_MISSING'); if ((await blankTab.getAXState({emit:false})) !== '') throw Error('BLANK_NOT_EMPTY'); let selectedBlank = await b.tabs.selected(); if (selectedBlank?.id !== blankTab.id) throw Error('BLANK_NOT_SELECTED'); return 'BLANK_' + blankTab.id;` })
@@ -938,6 +957,9 @@ async function qualify() {
     app.exit(0)
   } catch (error) {
     await writeFile(join(root, 'failure.txt'), String(error?.stack ?? error))
+    await writeFile(join(root, 'failure-windows.json'), JSON.stringify(BrowserWindow.getAllWindows().map(item => ({
+      url: item.webContents.getURL(), title: item.getTitle(), visible: item.isVisible(),
+    })), null, 2))
     if (window && !window.isDestroyed()) {
       await writeFile(join(root, 'failure-ui.json'), JSON.stringify(await window.webContents.executeJavaScript(`({
         buttons: [...document.querySelectorAll('button')].map(button => ({text: button.textContent?.trim(), label: button.getAttribute('aria-label')})),
@@ -950,4 +972,4 @@ async function qualify() {
   }
 }
 
-void qualify().catch(error => { console.error(error); app.exit(1) })
+void qualify().catch(error => { console.error(error); app.exit(1); setTimeout(() => process.exit(1), 2000).unref() })

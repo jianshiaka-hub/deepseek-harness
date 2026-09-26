@@ -9,9 +9,17 @@ const serve = handler => new Promise(resolve => {
 })
 
 async function run() {
-  let window, topServer, childServer
+  let window, topServer, childServer, destinationServer
   try {
     await app.whenReady()
+    if (process.env.SIDEBAR_FOREIGN_CROSS_ORIGIN === '1') {
+      destinationServer = await serve((_request, response) => {
+        response.writeHead(200, { 'content-type': 'text/html' })
+        response.end('<!doctype html><title>Approved destination</title>')
+      })
+    }
+    const destinationUrl = destinationServer
+      ? `http://127.0.0.1:${destinationServer.address().port}/next` : undefined
     childServer = await serve((request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' })
       response.end(request.url === '/next' ? '<!doctype html><title>Next</title>' : `<!doctype html><title>Foreign frame</title>
@@ -22,13 +30,16 @@ async function run() {
             addEventListener('beforeunload', event => { event.preventDefault(); event.returnValue=''; });
             window.__armed=navigator.userActivation.hasBeenActive;
           };
-          document.getElementById('navigate').onclick = () => { location.assign('/next'); };
+          document.getElementById('navigate').onclick = () => {
+            location.assign(${JSON.stringify(destinationUrl ?? '/next')});
+          };
         </script>`)
     })
     const childUrl = `http://127.0.0.1:${childServer.address().port}/`
     topServer = await serve((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' })
-      response.end(`<!doctype html><title>Top</title><iframe id="foreign" src="${childUrl}" style="position:absolute;left:20px;top:20px;width:300px;height:220px"></iframe>`)
+      response.end(`<!doctype html><title>Top</title><iframe id="foreign" src="${childUrl}" style="position:absolute;left:20px;top:20px;width:300px;height:220px"></iframe>${destinationUrl ?
+        `<iframe src="${new URL('/existing', destinationUrl)}" style="width:1px;height:1px"></iframe>` : ''}`)
     })
     const topUrl = `http://127.0.0.1:${topServer.address().port}/`
     window = new BrowserWindow({ show: true, width: 500, height: 400,
@@ -46,6 +57,15 @@ async function run() {
       await sleep(50)
     }
     if (!child) throw new Error('Foreign frame did not load')
+    if (destinationUrl) {
+      const existingUrl = new URL('/existing', destinationUrl).href
+      for (let attempt = 0; attempt < 100 && !guest.mainFrame.framesInSubtree.some(frame => frame.url === existingUrl); attempt++) {
+        await sleep(50)
+      }
+      if (!guest.mainFrame.framesInSubtree.some(frame => frame.url === existingUrl)) {
+        throw new Error('Approved destination site did not load in the initial frame tree')
+      }
+    }
     window.focus()
     guest.focus()
     await sleep(100)
@@ -101,14 +121,14 @@ async function run() {
       const navX = Math.round(frameRect.x + 2 + navRect.x)
       const navY = Math.round(frameRect.y + 2 + navRect.y)
       await sendClick(navX, navY)
-    } else void child.executeJavaScript("location.assign('/next')").catch(() => {})
+    } else void child.executeJavaScript(`location.assign(${JSON.stringify(destinationUrl ?? '/next')})`).catch(() => {})
     if (await dialogs.wait(denied, 250) !== null) throw new Error('Unapproved foreign beforeunload was offered')
     if (child.url !== childUrl) throw new Error('Unapproved foreign beforeunload did not cancel navigation')
     await dialogs.close(denied)
 
     if (process.env.SIDEBAR_FOREIGN_REPLAY_PROBE === '1') {
       if (requestedNavigation?.reason !== 'scriptInitiated' ||
-        requestedNavigation.url !== new URL('/next', childUrl).href) {
+        requestedNavigation.url !== (destinationUrl ?? new URL('/next', childUrl).href)) {
         throw new Error(`Foreign navigation request unavailable: ${JSON.stringify(requestedNavigation)}`)
       }
       const replay = await dialogs.begin(guest, topUrl,
@@ -138,20 +158,21 @@ async function run() {
     }
 
     const approved = await dialogs.begin(guest, topUrl,
-      [new URL(topUrl).origin, new URL(childUrl).origin])
+      [new URL(topUrl).origin, new URL(childUrl).origin,
+        ...(destinationUrl ? [new URL(destinationUrl).origin] : [])])
     if (process.env.SIDEBAR_FOREIGN_NAV_METHOD === 'click') {
       const navRect = await child.executeJavaScript(`(() => { const r = document.getElementById('navigate').getBoundingClientRect();
         return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`)
       const navX = Math.round(frameRect.x + 2 + navRect.x)
       const navY = Math.round(frameRect.y + 2 + navRect.y)
       await sendClick(navX, navY)
-    } else void child.executeJavaScript("location.assign('/next')").catch(() => {})
+    } else void child.executeJavaScript(`location.assign(${JSON.stringify(destinationUrl ?? '/next')})`).catch(() => {})
     const dialog = await dialogs.wait(approved, 3000)
     if (dialog?.type !== 'beforeunload') {
       throw new Error(`Approved foreign beforeunload was not offered: ${JSON.stringify(dialog)}`)
     }
     await dialogs.handle(approved, dialog.id, 'accept')
-    const nextUrl = new URL('/next', childUrl).href
+    const nextUrl = destinationUrl ?? new URL('/next', childUrl).href
     for (let attempt = 0; attempt < 60 && !guest.mainFrame.framesInSubtree.some(frame => frame.url === nextUrl); attempt++) {
       await sleep(50)
     }
@@ -168,6 +189,7 @@ async function run() {
     window?.destroy()
     topServer?.close()
     childServer?.close()
+    destinationServer?.close()
   }
 }
 

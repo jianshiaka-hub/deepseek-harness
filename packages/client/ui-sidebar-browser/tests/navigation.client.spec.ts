@@ -118,7 +118,8 @@ it('returns an agent goto beforeunload handle, then reports the committed destin
     createPage: () => h, openTab: vi.fn() })
   const source = 'https://example.test/'
   const destination = 'https://other.test/path'
-  const dialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'beforeunload' as const }
+  const dialog = { id: 'f2f81017-5baf-422a-830d-843c43f67ed4', type: 'beforeunload' as const,
+    origin: 'https://example.test' }
   try {
     controller.mount(h.host.id)
     controller.start(source)

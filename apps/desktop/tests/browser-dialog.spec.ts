@@ -351,6 +351,45 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.state.attached).toBe(false)
   })
 
+  it('replays a foreign beforeunload to another already loaded and approved site', async () => {
+    const h = fixture()
+    const lease = new BrowserDialogLease()
+    const source = 'https://foreign.test/frame'
+    const destination = 'https://other.test/next'
+    const frameId = 'foreign-frame'
+    h.sendCommand.mockImplementation(async (method: string, params?: object): Promise<object> => {
+      if (method === 'Page.getFrameTree') return { frameTree: {
+        frame: { id: 'top', url, loaderId: 'top-loader' }, childFrames: [
+          { frame: { id: frameId, url: source, loaderId: 'foreign-loader' } },
+          { frame: { id: 'other-frame', url: 'https://other.test/existing', loaderId: 'other-loader' } },
+        ],
+      } }
+      if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'frame-prompt-script' }
+      if (method === 'Page.navigate') {
+        queueMicrotask(() => { h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+          { type: 'beforeunload', url: source, frameId }) })
+        return { frameId }
+      }
+      if (method === 'Page.handleJavaScriptDialog' && (params as { accept?: boolean })?.accept) {
+        queueMicrotask(() => { h.debuggerPort.emit('message', undefined, 'Page.frameNavigated',
+          { frame: { id: frameId, url: destination } }) })
+      }
+      return {}
+    })
+    const token = await lease.begin(h.guest, url,
+      ['https://example.test', 'https://foreign.test', 'https://other.test'])
+    h.debuggerPort.emit('message', undefined, 'Page.frameRequestedNavigation',
+      { disposition: 'currentTab', reason: 'scriptInitiated', frameId, url: destination })
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogOpening',
+      { type: 'beforeunload', url: source, frameId })
+    const dialog = lease.get(token)!
+    h.debuggerPort.emit('message', undefined, 'Page.javascriptDialogClosed', { frameId, result: false })
+    expect(lease.get(token)).toEqual(dialog)
+    await expect(lease.handle(token, dialog.id, 'accept')).resolves.toBe(true)
+    expect(h.sendCommand).toHaveBeenCalledWith('Page.navigate', { frameId, url: destination })
+    expect(h.state.attached).toBe(false)
+  })
+
   it('rejects a replay when its original foreign document has changed', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()
@@ -379,7 +418,7 @@ describe('one-document Sidebar JavaScript dialog lease', () => {
     expect(h.sendCommand).not.toHaveBeenCalledWith('Page.navigate', expect.anything())
   })
 
-  it('does not replay an iframe unload toward another origin even when that origin is approved', async () => {
+  it('does not replay an iframe unload toward an approved origin absent from the initial frame tree', async () => {
     const h = fixture()
     const lease = new BrowserDialogLease()
     const source = 'https://foreign.test/frame'

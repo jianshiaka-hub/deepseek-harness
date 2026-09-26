@@ -104,6 +104,15 @@ interface ForeignFrameDescriptor {
   readonly name: string
 }
 
+function nativeFrameForDescriptor(parent: CaptureFrame, descriptor: ForeignFrameDescriptor): CaptureFrame {
+  const exact = parent.frames?.filter(frame => !frame.detached && frame.url === descriptor.src &&
+    frame.name === descriptor.name) ?? []
+  const matches = exact.length === 0 && descriptor.name !== ''
+    ? parent.frames?.filter(frame => !frame.detached && frame.name === descriptor.name) ?? [] : exact
+  if (matches.length !== 1 || matches[0] === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
+  return matches[0]
+}
+
 /** Resolve a named or uniquely addressed child without assuming DOM and native frame orders match. */
 async function resolveForeignFrame(parent: CaptureFrame, selector: string): Promise<{
   readonly frame: CaptureFrame
@@ -127,11 +136,8 @@ async function resolveForeignFrame(parent: CaptureFrame, selector: string): Prom
     !['http:', 'https:'].includes(new URL(raw.src).protocol)) {
     throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
   }
-  const matches = parent.frames.filter(frame => !frame.detached && frame.url === raw.src &&
-    frame.name === raw.name)
-  const match = matches[0]
-  if (matches.length !== 1 || match === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
-  return { frame: match, descriptor: { src: raw.src, name: raw.name } }
+  const descriptor = { src: raw.src, name: raw.name }
+  return { frame: nativeFrameForDescriptor(parent, descriptor), descriptor }
 }
 
 /** Query one explicitly selected, approved foreign frame with the same bounded DOM engine as the Webview. */
@@ -248,9 +254,10 @@ export async function pointForBrowserForeignRef(guest: FullPageCaptureGuest, exp
         frame.name === child.name).length !== 1) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
     const offset = await parent.executeJavaScript(`(() => {
       if (location.href !== ${JSON.stringify(parent.url)}) throw new Error('SIDEBAR_NAVIGATED');
-      const matches = [...document.querySelectorAll('iframe,frame')].filter(frame =>
-        frame.src === ${JSON.stringify(child.url)} &&
+      const named = [...document.querySelectorAll('iframe,frame')].filter(frame =>
         (frame.getAttribute('name') || '') === ${JSON.stringify(child.name)});
+      const bySource = named.filter(frame => frame.src === ${JSON.stringify(child.url)});
+      const matches = bySource.length === 0 && ${JSON.stringify(child.name)} !== '' ? named : bySource;
       if (matches.length !== 1) throw new Error('SIDEBAR_FRAME_AMBIGUOUS');
       const frame = matches[0], rect = frame.getBoundingClientRect();
       if (getComputedStyle(frame).transform !== 'none' ||
@@ -510,9 +517,7 @@ export async function pointForBrowserDrag(guest: FullPageCaptureGuest, expectedU
       !Number.isFinite(raw.x) || !Number.isFinite(raw.y) || frame.frames === undefined) {
       throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
     }
-    const matches = frame.frames.filter(child => !child.detached && child.url === raw.src && child.name === raw.name)
-    if (matches.length !== 1 || matches[0] === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
-    frame = matches[0]
+    frame = nativeFrameForDescriptor(frame, { src: raw.src, name: raw.name })
     localX = raw.x
     localY = raw.y
   }

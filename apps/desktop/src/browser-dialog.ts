@@ -28,6 +28,7 @@ type NativeDialogResponse = (action: 'accept' | 'dismiss', text?: string) => voi
 export interface BrowserDialogInfo {
   readonly id: string
   readonly type: DialogType
+  readonly origin: string
 }
 
 interface ActiveDialogWatch {
@@ -205,7 +206,9 @@ export class BrowserDialogLease {
           if (document !== undefined && URL.canParse(document.url) &&
             ['http:', 'https:'].includes(destination.protocol) &&
             destination.username === '' && destination.password === '' &&
-            destination.origin === new URL(document.url).origin &&
+            (destination.origin === new URL(document.url).origin ||
+              [...initialFrames.values()].some(frame => URL.canParse(frame.url) &&
+                new URL(frame.url).origin === destination.origin)) &&
             active.approvedPromptOrigins.has(destination.origin)) {
             active.navigationIntent = { frameId: params.frameId, url: destination.href, at: Date.now() }
           }
@@ -275,7 +278,7 @@ export class BrowserDialogLease {
         active.openedBeforeUnload = params.type === 'beforeunload' &&
           typeof params.frameId === 'string' && typeof source === 'string'
           ? { frameId: params.frameId, sourceUrl: source } : undefined
-        active.dialog = { id: randomUUID(), type: params.type }
+        active.dialog = { id: randomUUID(), type: params.type, origin: new URL(source).origin }
         if (active.timer !== undefined) clearTimeout(active.timer)
         // An abandoned agent turn must not leave a user-owned tab modal forever.
         active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
@@ -356,7 +359,7 @@ export class BrowserDialogLease {
       !this.validGuest(active) || !URL.canParse(sourceUrl) ||
       !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
     active.promptReply = respond
-    active.dialog = { id: randomUUID(), type: 'prompt' }
+    active.dialog = { id: randomUUID(), type: 'prompt', origin: new URL(sourceUrl).origin }
     if (active.timer !== undefined) clearTimeout(active.timer)
     active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
     for (const waiter of active.waiters) waiter(active.dialog)
@@ -372,7 +375,7 @@ export class BrowserDialogLease {
       active.promptReply !== undefined || !this.validGuest(active) || !URL.canParse(sourceUrl) ||
       !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
     active.guestDialogReply = respond
-    active.dialog = { id: randomUUID(), type }
+    active.dialog = { id: randomUUID(), type, origin: new URL(sourceUrl).origin }
     if (active.timer !== undefined) clearTimeout(active.timer)
     active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
     for (const waiter of active.waiters) waiter(active.dialog)
@@ -389,7 +392,7 @@ export class BrowserDialogLease {
       !this.validGuest(active) || !URL.canParse(sourceUrl) ||
       !active.approvedPromptOrigins.has(new URL(sourceUrl).origin)) return false
     active.nativeDialogReply = respond
-    active.dialog = { id: randomUUID(), type }
+    active.dialog = { id: randomUUID(), type, origin: new URL(sourceUrl).origin }
     if (active.timer !== undefined) clearTimeout(active.timer)
     active.timer = setTimeout(() => { void this.close(token).catch(() => {}) }, OPEN_WATCH_MS)
     for (const waiter of active.waiters) waiter(active.dialog)

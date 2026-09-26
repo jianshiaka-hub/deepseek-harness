@@ -32,7 +32,8 @@ function fixture(native = true) {
       action: vi.fn(async () => ({ url, title: 'Example', performed: true as const })),
       actionWithDialog: vi.fn(async () => ({ url, title: 'Example', performed: true as const })),
       pendingDialogUrl: vi.fn(() => url),
-      dialog: vi.fn(async () => ({ url, title: 'Example', dialog: { id: 'dialog-id', type: 'alert' as const } })),
+      dialog: vi.fn(async () => ({ url, title: 'Example', dialog: { id: 'dialog-id', type: 'alert' as const,
+        origin: 'https://example.test' } })),
       handleDialog: vi.fn(async () => ({ url, title: 'Example', performed: true as const })),
     } : {},
   }

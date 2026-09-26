@@ -208,6 +208,31 @@ describe('main-owned Sidebar full-page capture', () => {
       .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
   })
 
+  it('keeps a uniquely named foreign iframe addressable after its document leaves the HTML src', async () => {
+    const h = fixture()
+    const oldUrl = 'https://embedded.test/widget'
+    const nextUrl = 'https://approved.test/next'
+    const changed = { ...h.frame, frameTreeNodeId: 2, origin: 'https://approved.test',
+      url: nextUrl, name: 'target', framesInSubtree: [],
+      executeJavaScript: vi.fn(async () => ({ url: nextUrl, title: 'Next', count: 1,
+        rows: [{ ref: 'd4-12345678:button:Open', role: 'button', name: 'Open' }] })) }
+    const sibling = { ...changed, frameTreeNodeId: 3, url: 'https://approved.test/existing', name: 'sibling',
+      executeJavaScript: vi.fn(async () => { throw new Error('wrong frame') }) }
+    Object.assign(h.frame, { frames: [sibling, changed],
+      executeJavaScript: vi.fn(async () => ({ src: oldUrl, name: 'target' })) })
+    h.frame.framesInSubtree.push(changed, sibling)
+    const query = { method: 'getByRole' as const, value: 'button', name: 'Open', exact: true,
+      frames: ['#foreign'] }
+    const approved = ['https://example.test', 'https://approved.test']
+    await expect(locateBrowserForeignFrame(h.guest, url, query, approved))
+      .resolves.toMatchObject({ count: 1 })
+    expect(changed.executeJavaScript).toHaveBeenCalledOnce()
+    expect(sibling.executeJavaScript).not.toHaveBeenCalled()
+    sibling.name = 'target'
+    await expect(locateBrowserForeignFrame(h.guest, url, query, approved))
+      .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
+  })
+
   it('resolves a fresh foreign element ref through only its unique native parent', async () => {
     const h = fixture()
     const foreign = { ...h.frame, frameTreeNodeId: 2, origin: 'https://embedded.test',

@@ -31,6 +31,19 @@ const project = join(application, '.desktop-build/development/project')
 const profile = join(root, 'home/profiles/desktop')
 const manifest = JSON.parse(await readFile(join(repo, 'apps/desktop/package.json'), 'utf8')) as { version: string }
 const pnpm = JSON.parse(await readFile(join(repo, 'apps/desktop/node_modules/pnpm/package.json'), 'utf8')) as { version: string }
+const destination = createServer((_request, response) => {
+  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+  response.end('<!doctype html><title>Approved destination</title><body>Approved destination</body>')
+})
+await new Promise<void>((done, reject) => {
+  destination.once('error', reject)
+  destination.listen(0, '127.0.0.1', done)
+})
+const destinationAddress = destination.address()
+if (destinationAddress === null || typeof destinationAddress === 'string') {
+  throw new Error('Private destination page did not allocate a port')
+}
+const destinationOrigin = `http://127.0.0.1:${destinationAddress.port}`
 const embedded = createServer((_request, response) => {
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
   response.end('<body style="background:#0a8"><button onclick="const result=document.getElementById(\'foreignResult\');result.textContent=\'foreign clicked \'+(Number(result.dataset.clicks||0)+1);result.dataset.clicks=String(Number(result.dataset.clicks||0)+1)">Cross-origin frame</button><p id="foreignResult">foreign idle</p><p id="foreignSelectionText">foreign unique selection</p><input type="checkbox" aria-label="Foreign flag"><input type="text" aria-label="Foreign name" value="old" onkeydown="if(event.key===&quot;Enter&quot;) document.getElementById(&quot;foreignKeyResult&quot;).textContent=event.isTrusted?&quot;trusted&quot;:&quot;untrusted&quot;"><input type="password" aria-label="Foreign secret" value="safe"><input type="text" aria-label="Foreign locked" value="stable" readonly><select aria-label="Foreign color" onchange="document.querySelector(&quot;#foreignColorResult&quot;).textContent=this.value"><option value="red">Red</option><option value="blue">Blue</option></select><p id="foreignColorResult">red</p><p id="foreignKeyResult">idle</p></body>')
@@ -51,7 +64,7 @@ const page = createServer((request, response) => {
     return
   }
   if (request.url === '/cross-origin') {
-    response.end(`<!doctype html><title>Cross-origin capture</title><h1>Cross-origin capture</h1><iframe id="foreign" src="${embeddedOrigin}/frame" onload="document.body.dataset.embeddedReady='yes'" style="width:260px;height:320px"></iframe>`)
+    response.end(`<!doctype html><title>Cross-origin capture</title><h1>Cross-origin capture</h1><iframe id="foreign" name="foreign" src="${embeddedOrigin}/frame" onload="document.body.dataset.embeddedReady='yes'" style="width:260px;height:320px"></iframe><iframe id="approved-destination" name="approved-destination" src="${destinationOrigin}/existing" style="width:1px;height:1px"></iframe>`)
     return
   }
   response.end('<!doctype html><title>Isolated Computer Use</title><h1>Isolated Computer Use</h1><section data-testid="group-a"><div class="inner"><p data-testid="duplicate">Shared</p></div></section><div class="inner"><section data-testid="group-b"><p data-testid="duplicate">Shared</p></section></div><img id="logo" alt="Playwright logo" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="><span title="Issues count">25</span><div alt="Playwright logo">Unrelated alt</div><div id="generic" onclick="this.setAttribute(\'data-state\',\'clicked\')">Generic tile</div><button id="action" data-testid="action" onclick="document.getElementById(\'result\').textContent = \'clicked\'">Click test button</button><p id="result">idle</p><input id="name" aria-label="Name" placeholder="Your name" type="text"><input id="agree" aria-label="Agree" type="checkbox"><select id="color" aria-label="Color" onchange="document.getElementById(&quot;selectedColor&quot;).textContent=this.value"><option value="red">Red</option><option value="blue">Blue</option></select><p id="selectedColor">red</p><select id="colors" aria-label="Colors" multiple onchange="document.getElementById(&quot;selectedColors&quot;).textContent=Array.from(this.selectedOptions).map(option=>option.value).join(&quot;,&quot;)"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option></select><p id="selectedColors">none</p><input id="disabled" aria-label="Disabled" disabled><div id="hidden" style="display:none">Hidden element</div><iframe id="inner" src="/frame"></iframe><div style="height:2000px">End of page</div>')
@@ -67,7 +80,7 @@ try {
   // This rule exists only inside the disposable HOME for the private test page.
   await mkdir(join(root, '.dsh-computer-use-safe'), { recursive: true })
   await writeFile(join(root, '.dsh-computer-use-safe/browser-sites.json'), JSON.stringify({
-    version: 1, allowed: [new URL(pageUrl).origin, embeddedOrigin], blocked: [],
+    version: 1, allowed: [new URL(pageUrl).origin, embeddedOrigin, destinationOrigin], blocked: [],
   }))
   const require = createRequire(import.meta.url)
   const electron = require('electron') as string
@@ -118,11 +131,16 @@ try {
   const child = spawn(electron, [fileURLToPath(new URL('../tests/fixtures/sidebar-computer-use-workspace.mjs', import.meta.url)), '--lang=zh-CN'], {
     cwd: root, env: { ...environment, DSH_HOME: join(root, 'home'), USERPROFILE: root, HOME: root,
       TEMP: root, TMP: root, TMPDIR: root, DSH_SIDEBAR_CU_ROOT: root, DSH_SIDEBAR_CU_TOKEN: randomUUID(),
-      DSH_SIDEBAR_CU_PAGE_URL: pageUrl, DSH_DESKTOP_PRIMARY_RUNTIME_DIR: developmentRuntimeDirectory(),
+      DSH_SIDEBAR_CU_PAGE_URL: pageUrl, DSH_SIDEBAR_CU_DESTINATION_URL: `${destinationOrigin}/next`,
+      DSH_DESKTOP_PRIMARY_RUNTIME_DIR: developmentRuntimeDirectory(),
       DSH_DESKTOP_OPEN_DEVTOOLS: '0' }, stdio: 'inherit', windowsHide: false,
   })
   let timedOut = false
-  const timer = setTimeout(() => { timedOut = true; child.kill() }, 120_000)
+  const timer = setTimeout(() => {
+    timedOut = true
+    child.kill('SIGTERM')
+    setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL') }, 5_000).unref()
+  }, 120_000)
   try {
     const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((done, reject) => {
       child.once('error', reject)
@@ -136,5 +154,6 @@ try {
 } finally {
   await new Promise<void>((resolveClose) => { page.closeAllConnections(); page.close(() => resolveClose()) })
   await new Promise<void>((resolveClose) => { embedded.closeAllConnections(); embedded.close(() => resolveClose()) })
+  await new Promise<void>((resolveClose) => { destination.closeAllConnections(); destination.close(() => resolveClose()) })
   removeOwnedDirectory(application)
 }
