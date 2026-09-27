@@ -77,6 +77,17 @@ describe('one-guest native drag lease', () => {
     expect(h.state.attached).toBe(false)
   })
 
+  it('invalidates a pending drop before dismissing an abandoned dialog', async () => {
+    const h = fixture()
+    const lease = new BrowserDragLease()
+    const token = await lease.begin(h.guest, url)
+    h.intercept({ items: [{ mimeType: 'text/plain', data: 'page-owned' }], dragOperationsMask: 1 })
+    lease.invalidate(token)
+    await expect(lease.finish(token, url, { x: 120, y: 75 })).rejects.toThrow('SIDEBAR_NAVIGATED')
+    expect(h.sendCommand).not.toHaveBeenCalledWith('Input.dispatchDragEvent', expect.anything())
+    expect(h.state.attached).toBe(false)
+  })
+
   it('bounds the drop point and releases the debugger after a failed attach or cancel', async () => {
     const h = fixture()
     const lease = new BrowserDragLease()

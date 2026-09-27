@@ -58,6 +58,10 @@ export class BrowserDragLease {
     active.timer = setTimeout(() => { void this.cancel(active.token).catch(() => {}) }, 300_000)
   }
 
+  invalidate(token: string): void {
+    if (this.active?.token === token) this.active.invalidated = true
+  }
+
   async begin(guest: DragGuest, expectedUrl: string): Promise<string> {
     if (this.busy || guest.debugger.isAttached()) throw new Error('SIDEBAR_DRAG_BUSY')
     if (guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {

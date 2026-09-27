@@ -418,13 +418,18 @@ export class DesktopBrowserGuests {
   async finishDialog(owner: DialogOwner, id: unknown, token: unknown): Promise<void> {
     const key = this.dialogToken(owner, id, token)
     const drag = this.activeDrag
-    if (drag?.lease === key) {
-      try { await this.dragLease.cancel(drag.token).catch(() => {}) }
-      finally { if (this.activeDrag === drag) this.activeDrag = undefined }
-    }
+    // Invalidate the drop synchronously, then dismiss the modal before sending
+    // CDP drag-cancellation commands that cannot complete while it is open.
+    if (drag?.lease === key) this.dragLease.invalidate(drag.token)
     this.activeDialogs.delete(key)
     this.activeNavigations.delete(token as string)
-    await this.dialogLease.close(token as string)
+    try { await this.dialogLease.close(token as string) }
+    finally {
+      if (drag?.lease === key) {
+        try { await this.dragLease.cancel(drag.token).catch(() => {}) }
+        finally { if (this.activeDrag === drag) this.activeDrag = undefined }
+      }
+    }
   }
 
   private dialogToken(owner: DialogOwner, id: unknown, token: unknown): DesktopBrowserLeaseId {
