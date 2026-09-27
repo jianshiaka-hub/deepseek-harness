@@ -62,6 +62,14 @@ export interface DesktopBrowserBridge {
     initialUrl: string): Promise<void>
   cancelBlankNavigationPreflight?(clientId: string, sessionId: string, tabId: string,
     initialUrl: string): Promise<void>
+  /** Bounded read of currently loaded foreign frames; available only with a main-process guard. */
+  readonly foreignFrameReadVersion?: 1
+  auditFrames?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<{
+    readonly origins: readonly string[]; readonly fingerprint: string }>
+  inspectForeignText?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[]): Promise<{ readonly fingerprint: string;
+      readonly frames: readonly { readonly origin: string; readonly text: string;
+        readonly roles: string }[] }>
   armNavigationPreflight?(lease: DesktopBrowserLeaseId, clientId: string, sessionId: string,
     tabId: string, navigationEpoch: number, expectedUrl: string): Promise<void>
   resolveNavigationPreflight?(token: string, allowed: boolean): Promise<void>

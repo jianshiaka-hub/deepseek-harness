@@ -36,11 +36,13 @@ interface Guard {
   readonly expectedUrl: string
   readonly documentUrl: string
   readonly popupInitialUrl?: string
+  readonly allowedCommits: Set<string>
 }
 
 interface Pending {
   readonly guard: Guard
   readonly targetUrl: string
+  readonly resourceType: 'mainFrame' | 'subFrame'
   readonly callback: (response: { readonly cancel: boolean }) => void
   readonly timer: ReturnType<typeof setTimeout>
 }
@@ -64,8 +66,19 @@ export class BrowserNavigationPreflight {
     }
     this.revokeGuest(guest)
     this.guards.set(guest.id, { owner, guest, lease, clientId, sessionId, tabId,
-      navigationEpoch, expectedUrl, documentUrl,
+      navigationEpoch, expectedUrl, documentUrl, allowedCommits: new Set(),
       ...(popupInitialUrl === undefined ? {} : { popupInitialUrl }) })
+  }
+
+  /** Keep an ordinary armed tab guarded after an approved main document commits. */
+  commit(guest: Guest, url: string): void {
+    const guard = this.guards.get(guest.id)
+    if (guard === undefined || guard.guest !== guest || guard.popupInitialUrl !== undefined ||
+      !URL.canParse(url) || !['http:', 'https:'].includes(new URL(url).protocol)) return
+    const origin = new URL(url).origin
+    if (origin !== new URL(guard.expectedUrl).origin && !guard.allowedCommits.has(origin)) return
+    this.guards.set(guest.id, { ...guard, expectedUrl: url, documentUrl: url,
+      navigationEpoch: guard.navigationEpoch + 1, allowedCommits: new Set() })
   }
 
   /** @returns true only when this class owns the WebRequest callback. */
@@ -99,7 +112,8 @@ export class BrowserNavigationPreflight {
     }
     const token = randomUUID()
     const timer = setTimeout(() => { this.resolve(token, guard.owner, false) }, 120_000)
-    this.pending.set(token, { guard, targetUrl, callback, timer })
+    this.pending.set(token, { guard, targetUrl, resourceType: resourceType as 'mainFrame' | 'subFrame',
+      callback, timer })
     try {
       guard.owner.send(this.channel, { token, lease: guard.lease, clientId: guard.clientId,
         sessionId: guard.sessionId, tabId: guard.tabId, navigationEpoch: guard.navigationEpoch,
@@ -129,8 +143,12 @@ export class BrowserNavigationPreflight {
     }
     this.pending.delete(token)
     clearTimeout(request.timer)
-    request.callback({ cancel: !allowed || owner.isDestroyed() || request.guard.guest.isDestroyed() ||
-      request.guard.guest.getURL() !== request.guard.documentUrl })
+    const cancel = !allowed || owner.isDestroyed() || request.guard.guest.isDestroyed() ||
+      request.guard.guest.getURL() !== request.guard.documentUrl
+    if (!cancel && request.resourceType === 'mainFrame') {
+      request.guard.allowedCommits.add(new URL(request.targetUrl).origin)
+    }
+    request.callback({ cancel })
   }
 
   /** Tab removal or window shutdown cancels all held requests from that guest. */

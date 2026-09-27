@@ -5,6 +5,8 @@ import type { DesktopBrowserInitialPreflight, DesktopBrowserOccurrence, DesktopB
   DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
+import { auditBrowserFrames, readBrowserForeignText,
+  type BrowserFrameAudit, type BrowserForeignText } from './browser-foreign-read.ts'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -119,6 +121,7 @@ export class DesktopBrowserGuests {
     })
     owner.on('did-attach-webview', (_event, guest) => {
       let attachedLease: DesktopBrowserLeaseId | undefined
+      guest.on('did-navigate', (_event, url) => { this.navigationPreflight.commit(guest, url) })
       // The first document is an inert about:blank carrying the approved lease.
       // Bind on the main-process event before the renderer can navigate the ready guest.
       guest.once('dom-ready', () => {
@@ -234,6 +237,36 @@ export class DesktopBrowserGuests {
 
   private blankClaimKey(owner: WebContents, sessionId: string, tabId: string): string {
     return `${owner.id}\0${sessionId}\0${tabId}`
+  }
+
+  /** Audit only the named live guest; the plugin authorizes returned origins before reading. */
+  auditFrames(owner: WebContents, id: unknown, expectedUrl: unknown): BrowserFrameAudit {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    return auditBrowserFrames(guest, expectedUrl as string)
+  }
+
+  /** Return bounded text only after the plugin has authorized every current frame origin. */
+  inspectForeignText(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown): Promise<BrowserForeignText> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 || approvedOrigins.length > 100 ||
+      approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    return readBrowserForeignText(guest, expectedUrl as string, approvedOrigins as string[])
+  }
+
+  private readableGuest(owner: WebContents, id: unknown, expectedUrl: unknown): WebContents {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' ||
+      expectedUrl.length > 16_384 || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      owner.isDestroyed() || guest.isDestroyed() || guest.isLoadingMainFrame() ||
+      guest.getURL() !== expectedUrl) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    return guest
   }
 
   /** A plugin can arm only a guest lease issued to this authenticated application window. */

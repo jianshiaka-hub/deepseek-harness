@@ -55,6 +55,34 @@ describe('agent navigation preflight', () => {
     h.gate.dispose()
   })
 
+  it('keeps a same-origin committed page guarded at its next navigation epoch', () => {
+    const h = fixture()
+    h.state.url = 'https://source.test/next'
+    h.gate.commit(h.guest, h.state.url)
+    const callback = vi.fn()
+    expect(h.gate.intercept(42, 'subFrame', 'https://foreign.test/frame', 'GET', callback)).toBe(true)
+    expect(h.sent[0]).toMatchObject({ expectedUrl: h.state.url, navigationEpoch: 4,
+      targetUrl: 'https://foreign.test/frame', resourceType: 'subFrame' })
+    h.gate.resolve(h.sent[0]!.token, h.owner, false)
+    expect(callback).toHaveBeenCalledExactlyOnceWith({ cancel: true })
+    h.gate.dispose()
+  })
+
+  it('carries only an approved cross-origin main-frame commit into the next page', () => {
+    const h = fixture()
+    const first = vi.fn()
+    h.gate.intercept(42, 'mainFrame', 'https://approved.test/next', 'GET', first)
+    h.gate.resolve(h.sent[0]!.token, h.owner, true)
+    h.state.url = 'https://approved.test/next'
+    h.gate.commit(h.guest, h.state.url)
+    const second = vi.fn()
+    expect(h.gate.intercept(42, 'subFrame', 'https://foreign.test/frame', 'GET', second)).toBe(true)
+    expect(h.sent[1]).toMatchObject({ expectedUrl: h.state.url, navigationEpoch: 4 })
+    h.gate.resolve(h.sent[1]!.token, h.owner, false)
+    expect(second).toHaveBeenCalledExactlyOnceWith({ cancel: true })
+    h.gate.dispose()
+  })
+
   it('rejects an answer from another window or after the source has changed', () => {
     const h = fixture()
     const callback = vi.fn()
