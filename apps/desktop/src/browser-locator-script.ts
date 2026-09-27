@@ -155,20 +155,83 @@ export const guestDomHelpers = String.raw`
     }
     return value;
   };
-  const sidebarMatchesCSS = (node,selector) => {
-    if (!selector.includes(':has-text(') && node.matches(selector)) return true;
-    const matchesPart = (candidate,part) => {
-      const hasText = /^(.*):has-text\((?:"([^"\\]*)"|'([^'\\]*)')\)$/.exec(part);
-      if (hasText) {
-        if (hasText[1] && !candidate.matches(hasText[1])) return false;
-        const needle = (hasText[2] ?? hasText[3]).trim().toLocaleLowerCase();
-        return needle.length > 0 && sidebarCssText(candidate).replace(/\s+/g,' ')
-          .toLocaleLowerCase().includes(needle);
-      }
-      if (candidate.matches(part)) return true;
-      const has = /^(.*):has\(([^()]*)\)$/.exec(part);
-      if (!has || has[1] && !candidate.matches(has[1])) return false;
-      const relative = has[2].trim();
+      const sidebarCssPseudo = part => {
+        let quote = '', square = 0, round = 0, escape = false;
+        for (let i = 0; i < part.length; i++) {
+          const char = part[i];
+          if (escape) { escape = false; continue; }
+          if (char === '\\') { escape = true; continue; }
+          if (quote) { if (char === quote) quote = ''; continue; }
+          if (char === '"' || char === "'") { quote = char; continue; }
+          if (char === '[') { square++; continue; }
+          if (char === ']') { square--; continue; }
+          if (char === ':' && square === 0 && round === 0) {
+            const name = part.startsWith(':has-text(',i) ? 'has-text' :
+              part.startsWith(':has(',i) ? 'has' : null;
+            if (name) {
+              const open = i + name.length + 1;
+              let depth = 1, argumentQuote = '', argumentEscape = false;
+              for (let j = open + 1; j < part.length; j++) {
+                const next = part[j];
+                if (argumentEscape) { argumentEscape = false; continue; }
+                if (next === '\\') { argumentEscape = true; continue; }
+                if (argumentQuote) { if (next === argumentQuote) argumentQuote = ''; continue; }
+                if (next === '"' || next === "'") { argumentQuote = next; continue; }
+                if (next === '(') depth++;
+                if (next === ')' && --depth === 0) {
+                  return {name,argument:part.slice(open + 1,j),
+                    rest:part.slice(0,i) + part.slice(j + 1)};
+                }
+              }
+              return null;
+            }
+          }
+          if (char === '(') round++;
+          if (char === ')') round--;
+        }
+        return null;
+      };
+      const sidebarCssString = argument => {
+        const value = argument.trim();
+        const quote = value[0];
+        if (!['"',"'"].includes(quote) || value.length < 2 ||
+          value.at(-1) !== quote) return null;
+        let result = '';
+        for (let i = 1; i < value.length - 1; i++) {
+          const char = value[i];
+          if (char === quote) return null;
+          if (char !== '\\') { result += char; continue; }
+          if (++i >= value.length - 1) return null;
+          const next = value[i];
+          if (/[0-9a-f]/i.test(next)) {
+            let hex = next;
+            while (hex.length < 6 && i + 1 < value.length - 1 &&
+              /[0-9a-f]/i.test(value[i + 1])) hex += value[++i];
+            if (i + 1 < value.length - 1 && /\s/.test(value[i + 1])) i++;
+            const point = parseInt(hex,16);
+            result += point === 0 || point > 0x10ffff ? '\ufffd' :
+              String.fromCodePoint(point);
+          } else if (next !== '\n' && next !== '\r') result += next;
+        }
+        return result;
+      };
+      const sidebarMatchesCSS = (node,selector) => {
+        const matchesPart = (candidate,part,depth=0) => {
+          if (depth > 16) throw new Error('SIDEBAR_DOM_LIMIT');
+          const pseudo = sidebarCssPseudo(part);
+          if (pseudo) {
+            if (pseudo.rest && !matchesPart(candidate,pseudo.rest,depth+1)) return false;
+            if (pseudo.name === 'has-text') {
+              const text = sidebarCssString(pseudo.argument);
+              if (text === null) return false;
+              const needle = text.trim().replace(/\s+/g,' ').toLocaleLowerCase();
+              return needle.length > 0 && sidebarCssText(candidate).replace(/\s+/g,' ')
+                .toLocaleLowerCase().includes(needle);
+            }
+          } else {
+            try { return candidate.matches(part); } catch { return false; }
+          }
+          const relative = pseudo.argument.trim();
       const combinator = /^[>+~]/.exec(relative)?.[0] || '';
       const target = combinator ? relative.slice(1).trim() : relative;
       if (!target) return false;
