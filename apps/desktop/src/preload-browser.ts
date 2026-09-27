@@ -44,6 +44,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignFrameTypeVersion: 1,
     richPasteVersion: 1,
     nativeDragVersion: 1,
+    dialogVersion: 1,
     fileChooserVersion: 1,
     downloadVersion: 1,
     foreignFrameOptionVersion: 1,
@@ -105,6 +106,19 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
       lease, expectedUrl) as ReturnType<NonNullable<DesktopBrowserBridge['beginDrag']>>,
     finishDrag: (lease, token, point) => ipcRenderer.invoke(DESKTOP_IPC.browserDragEnd,
       lease, token, point) as ReturnType<NonNullable<DesktopBrowserBridge['finishDrag']>>,
+    beginDialog: (lease, expectedUrl, approvedPromptOrigins) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogBegin,
+      lease, expectedUrl, approvedPromptOrigins) as ReturnType<NonNullable<DesktopBrowserBridge['beginDialog']>>,
+    navigateWithDialog: (lease, token, expectedUrl, method, destination) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserDialogNavigate, lease, token, expectedUrl, method, destination) as
+      ReturnType<NonNullable<DesktopBrowserBridge['navigateWithDialog']>>,
+    getDialog: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogGet,
+      lease, token) as ReturnType<NonNullable<DesktopBrowserBridge['getDialog']>>,
+    waitDialog: (lease, token, timeoutMs) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogWait,
+      lease, token, timeoutMs) as ReturnType<NonNullable<DesktopBrowserBridge['waitDialog']>>,
+    handleDialog: (lease, token, dialogId, action, text) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogHandle,
+      lease, token, dialogId, action, text) as ReturnType<NonNullable<DesktopBrowserBridge['handleDialog']>>,
+    finishDialog: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserDialogEnd,
+      lease, token) as ReturnType<NonNullable<DesktopBrowserBridge['finishDialog']>>,
     selectForeignOption: (lease, expectedUrl, ref, approvedOrigins, options) => ipcRenderer.invoke(
       DESKTOP_IPC.browserSelectForeignOption, lease, expectedUrl, ref, approvedOrigins, options) as
       ReturnType<NonNullable<DesktopBrowserBridge['selectForeignOption']>>,

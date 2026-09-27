@@ -205,6 +205,13 @@ export interface BrowserDragPoint {
   readonly targetFingerprint: string
 }
 
+/** Opaque handle and exact source origin; page-provided dialog text stays in the guest. */
+export interface BrowserJsDialog {
+  readonly id: string
+  readonly type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  readonly origin: string
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -275,6 +282,17 @@ export interface DesktopBrowserBridge {
   beginDrag?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
   finishDrag?(lease: DesktopBrowserLeaseId, token: string,
     point?: { readonly x: number; readonly y: number }): Promise<{ readonly dropped: boolean }>
+  /** One action-scoped modal watch in the caller's exact-URL guest. */
+  readonly dialogVersion?: 1
+  beginDialog?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedPromptOrigins?: readonly string[]): Promise<string>
+  navigateWithDialog?(lease: DesktopBrowserLeaseId, token: string, expectedUrl: string,
+    method: 'goto' | 'back' | 'forward', destination?: string): Promise<void>
+  getDialog?(lease: DesktopBrowserLeaseId, token: string): Promise<BrowserJsDialog | null>
+  waitDialog?(lease: DesktopBrowserLeaseId, token: string, timeoutMs?: number): Promise<BrowserJsDialog | null>
+  handleDialog?(lease: DesktopBrowserLeaseId, token: string, dialogId: string,
+    action: 'accept' | 'dismiss', text?: string): Promise<true | void>
+  finishDialog?(lease: DesktopBrowserLeaseId, token: string): Promise<void>
   /** Fixed exact-option selection in one approved foreign frame. */
   readonly foreignFrameOptionVersion?: 1
   selectForeignOption?(lease: DesktopBrowserLeaseId, expectedUrl: string,

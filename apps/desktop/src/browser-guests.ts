@@ -9,6 +9,7 @@ import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './
 import { BrowserDragLease } from './browser-drag.ts'
 import { BrowserFileChooserLease, type BrowserFileChooserStatus } from './browser-filechooser.ts'
 import { BrowserDownloadLease } from './browser-download.ts'
+import { BrowserDialogLease, type BrowserDialogInfo } from './browser-dialog.ts'
 import type { BrowserDownloadStatus } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
@@ -33,6 +34,9 @@ interface GuestLease {
   readonly blankClaim?: { readonly key: string; readonly value: DesktopBrowserInitialPreflight }
 }
 
+type DialogOwner = Pick<WebContents, 'isDestroyed'>
+type DialogGuest = Parameters<BrowserDialogLease['begin']>[0]
+
 /** Owns workspace storage partitions independently from individual tab guests. */
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
@@ -44,12 +48,16 @@ export class DesktopBrowserGuests {
   private readonly dragLease = new BrowserDragLease()
   private readonly fileChooserLease = new BrowserFileChooserLease()
   private readonly downloadLease = new BrowserDownloadLease()
+  private readonly dialogLease = new BrowserDialogLease()
+  private readonly activeDialogs = new Map<DesktopBrowserLeaseId, string>()
+  private readonly activeNavigations = new Set<string>()
   private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
   private activeDrag: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId;
     readonly token: string; readonly expectedUrl: string } | undefined
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
-  constructor(private readonly hostUrl: () => string | undefined) {}
+  constructor(private readonly hostUrl: () => string | undefined,
+    private readonly guestPreloadPath = '') {}
 
   private clearExpiredPaste(): void {
     if (this.activePaste !== undefined && this.clipboardLease.activeToken !== this.activePaste.token) {
@@ -117,6 +125,8 @@ export class DesktopBrowserGuests {
     if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
     this.clearExpiredDrag()
     if (this.activeDrag?.lease === key) await this.finishDrag(owner, key, this.activeDrag.token)
+    const dialogToken = this.activeDialogs.get(key)
+    if (dialogToken !== undefined) await this.finishDialog(owner, key, dialogToken)
     if (lease.guest !== undefined) this.downloadLease.cancelGuest(lease.guest)
     if (lease.guest !== undefined) await this.fileChooserLease.cancelGuest(lease.guest)
     lease.releaseInput?.()
@@ -155,11 +165,15 @@ export class DesktopBrowserGuests {
         nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false,
         contextIsolation: true, sandbox: true, webSecurity: true, allowRunningInsecureContent: false,
         webviewTag: false, plugins: false, navigateOnDragDrop: false, disableDialogs: true,
+        ...(this.guestPreloadPath ? { preload: this.guestPreloadPath } : {}),
         devTools: !app.isPackaged,
       })
       params.httpreferrer = ''
     })
     owner.on('did-attach-webview', (_event, guest) => {
+      // Reject native dialogs unless one selected guest has a live, origin-scoped watch.
+      this.dialogLease.installNativeDialogGuard(guest,
+        (sourceUrl, type, respond) => this.offerNativeDialog(guest, sourceUrl, type, respond))
       let attachedLease: DesktopBrowserLeaseId | undefined
       guest.on('did-navigate', (_event, url) => { this.navigationPreflight.commit(guest, url) })
       // The first document is an inert about:blank carrying the approved lease.
@@ -261,6 +275,159 @@ export class DesktopBrowserGuests {
         details.url, details.method, callback)) return
       callback({ cancel: false })
     })
+  }
+
+  /** Watch only this owned guest for an action-triggered JavaScript modal. */
+  async beginDialog(owner: DialogOwner, id: unknown, expectedUrl: unknown,
+    approvedPromptOrigins?: unknown): Promise<string> {
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_DIALOG_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    if (approvedPromptOrigins !== undefined && (!Array.isArray(approvedPromptOrigins) ||
+      !approvedPromptOrigins.every(origin => typeof origin === 'string'))) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    if (approvedPromptOrigins !== undefined) {
+      auditBrowserFrames(guest, expectedUrl, approvedPromptOrigins)
+    }
+    const previous = this.activeDialogs.get(key)
+    if (previous !== undefined) {
+      try { this.dialogLease.get(previous); throw new Error('SIDEBAR_DIALOG_BUSY') }
+      catch (error) {
+        if (!(error instanceof Error) || error.message !== 'SIDEBAR_DIALOG_LEASE_UNAVAILABLE') throw error
+        this.activeDialogs.delete(key)
+      }
+    }
+    const token = await this.dialogLease.begin(guest, expectedUrl, approvedPromptOrigins,
+      this.fileChooserLease.ownsGuest(guest))
+    this.activeDialogs.set(key, token)
+    return token
+  }
+
+  /** Accept a prompt only from a currently watched, owned guest frame. */
+  offerPrompt(guest: DialogGuest, sourceUrl: string | undefined,
+    respond: (answer: string | null | { readonly useDefault: true }) => void): void {
+    if (typeof sourceUrl !== 'string') { respond(null); return }
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerPrompt(token, sourceUrl, respond)) return
+    }
+    respond(null)
+  }
+
+  /** Hold only top-level or approved same-origin guest alert/confirm shims. */
+  offerGuestDialog(guest: DialogGuest, sourceUrl: string | undefined, type: unknown,
+    respond: (answer: boolean | undefined) => void): void {
+    if (typeof sourceUrl !== 'string' || (type !== 'alert' && type !== 'confirm')) {
+      respond(type === 'confirm' ? false : undefined)
+      return
+    }
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerGuestDialog(token, sourceUrl, type, respond)) return
+    }
+    respond(type === 'confirm' ? false : undefined)
+  }
+
+  /** Route Electron's held child-frame dialog only through the current approved action lease. */
+  private offerNativeDialog(guest: DialogGuest, sourceUrl: string, type: 'alert' | 'confirm' | 'prompt',
+    respond: (action: 'accept' | 'dismiss', text?: string) => void): boolean {
+    for (const [key, token] of this.activeDialogs) {
+      const lease = this.leases.get(key)
+      if (lease?.guest === guest && lease.attached && !lease.owner.isDestroyed() &&
+        this.dialogLease.offerNativeDialog(token, sourceUrl, type, respond)) return true
+    }
+    return false
+  }
+
+  /** One fixed, URL-bound navigation per active dialog watch; page code cannot replace the isolated-world method. */
+  navigate(owner: WebContents, id: unknown, token: unknown, expectedUrl: unknown,
+    method: unknown, destination: unknown): void {
+    const key = this.dialogToken(owner, id, token)
+    const guest = this.leases.get(key)?.guest
+    if (guest === undefined || guest.isDestroyed() || guest.isLoadingMainFrame() ||
+      typeof expectedUrl !== 'string' || guest.getURL() !== expectedUrl ||
+      !this.allowedNavigation(expectedUrl) ||
+      !['goto', 'back', 'forward'].includes(method as string) ||
+      (method === 'goto' && (typeof destination !== 'string' || !this.allowedNavigation(destination) ||
+        new URL(destination).href !== destination)) ||
+      (method !== 'goto' && destination !== undefined) ||
+      this.dialogLease.get(token as string) !== null || this.activeNavigations.has(token as string)) {
+      throw new Error('SIDEBAR_NAVIGATION_UNAVAILABLE')
+    }
+    this.activeNavigations.add(token as string)
+    try {
+      if (method === 'goto' && destination === expectedUrl) {
+        guest.reload()
+        return
+      }
+      const command = method === 'goto' ? `location.assign(${JSON.stringify(destination)})`
+        : method === 'back' ? 'history.back()' : 'history.forward()'
+      const code = `(() => {
+        if (location.href !== ${JSON.stringify(expectedUrl)}) throw new Error('SIDEBAR_NAVIGATED');
+        ${command};
+      })()`
+      // Page unload can destroy the evaluation context while the navigation
+      // succeeds. The Client reports success only from observed guest events.
+      void guest.executeJavaScriptInIsolatedWorld(1001, [{ code }]).catch(() => {})
+    } catch (error) {
+      this.activeNavigations.delete(token as string)
+      throw error
+    }
+  }
+
+  /** Read only a modal handle and type; its page-provided text stays in the guest. */
+  getDialog(owner: DialogOwner, id: unknown, token: unknown): BrowserDialogInfo | null {
+    this.dialogToken(owner, id, token)
+    return this.dialogLease.get(token as string)
+  }
+
+  /** Await a dialog without exposing raw CDP commands to the renderer. */
+  waitDialog(owner: DialogOwner, id: unknown, token: unknown, timeoutMs: unknown): Promise<BrowserDialogInfo | null> {
+    this.dialogToken(owner, id, token)
+    if (timeoutMs !== undefined && typeof timeoutMs !== 'number') {
+      throw new Error('SIDEBAR_DIALOG_WAIT_UNAVAILABLE')
+    }
+    return this.dialogLease.wait(token as string, typeof timeoutMs === 'number' ? timeoutMs : 5000)
+  }
+
+  /** Resolve one matching handle; a stale handle cannot control a newer dialog. */
+  async handleDialog(owner: DialogOwner, id: unknown, token: unknown, dialogId: unknown,
+    action: unknown, text: unknown): Promise<true | void> {
+    const key = this.dialogToken(owner, id, token)
+    if (typeof dialogId !== 'string' || !['accept', 'dismiss'].includes(action as string) ||
+      text !== undefined && typeof text !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    const replayed = await this.dialogLease.handle(token as string, dialogId, action as 'accept' | 'dismiss', text)
+    this.activeDialogs.delete(key)
+    this.activeNavigations.delete(token as string)
+    return replayed
+  }
+
+  /** Abandon a watch and dismiss any open modal so the guest is not left blocked. */
+  async finishDialog(owner: DialogOwner, id: unknown, token: unknown): Promise<void> {
+    const key = this.dialogToken(owner, id, token)
+    this.activeDialogs.delete(key)
+    this.activeNavigations.delete(token as string)
+    await this.dialogLease.close(token as string)
+  }
+
+  private dialogToken(owner: DialogOwner, id: unknown, token: unknown): DesktopBrowserLeaseId {
+    if (typeof id !== 'string' || typeof token !== 'string') throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    if (lease === undefined || lease.owner !== owner || this.activeDialogs.get(key) !== token) {
+      throw new Error('SIDEBAR_DIALOG_LEASE_UNAVAILABLE')
+    }
+    return key
   }
 
   /** Keep an exact one-use claim until a matching guest commits or the owner closes. */
