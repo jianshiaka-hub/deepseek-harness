@@ -8,8 +8,9 @@ it('passes an agent-created tab bootstrap claim before creating its first webvie
   const initialUrl = 'https://approved.test/start'
   const initialPreflight = { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     sessionId: 'session-a', tabId: 'tab-a', initialUrl }
+  const acquire = vi.fn(async () => ({ lease: 'lease' as DesktopBrowserLeaseId, partition: 'partition' }))
   const bridge: DesktopBrowserBridge = {
-    acquire: vi.fn(async () => ({ lease: 'lease' as DesktopBrowserLeaseId, partition: 'partition' })),
+    acquire,
     release: vi.fn(async () => {}), onOpenRequested: () => () => {},
   }
   const presentation = new ElectronWebviewPresentation({ mounted: () => { frame.attach() },
@@ -23,7 +24,7 @@ it('passes an agent-created tab bootstrap claim before creating its first webvie
   try {
     hide = presentation.mount(host.id)
     frame.loadUrl({ kind: 'https', url: initialUrl, title: 'Approved' })
-    await vi.waitFor(() => { expect(bridge.acquire).toHaveBeenCalledWith('cwd:/workspace', initialPreflight) })
+    await vi.waitFor(() => { expect(acquire).toHaveBeenCalledWith('cwd:/workspace', initialPreflight) })
     await vi.waitFor(() => { expect(host.firstElementChild).not.toBeNull() })
     const element = host.firstElementChild as WebviewElement
     let url = 'about:blank'
@@ -35,8 +36,8 @@ it('passes an agent-created tab bootstrap claim before creating its first webvie
     element.dispatchEvent(new Event('did-navigate'))
     hide()
     hide = presentation.mount(host.id)
-    await vi.waitFor(() => { expect(bridge.acquire).toHaveBeenCalledTimes(2) })
-    expect(bridge.acquire).toHaveBeenLastCalledWith('cwd:/workspace', undefined)
+    await vi.waitFor(() => { expect(acquire).toHaveBeenCalledTimes(2) })
+    expect(acquire).toHaveBeenLastCalledWith('cwd:/workspace', undefined)
   } finally {
     hide?.()
     await frame.dispose()

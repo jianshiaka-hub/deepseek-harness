@@ -4,10 +4,15 @@ import type { BrowserWindow, WebContents } from 'electron'
 import { DESKTOP_IPC } from '../src/ipc.ts'
 
 const request = vi.hoisted(() => ({ handler: undefined as undefined | ((details: {
-  url: string; webContentsId: number; resourceType: string; method: string
+  url: string
+  webContentsId: number
+  resourceType: string
+  method: string
 }, callback: (answer: { cancel: boolean }) => void) => void) }))
 vi.mock('electron', () => ({
   app: { isPackaged: true },
+  clipboard: { read: vi.fn(async () => []), write: vi.fn(async () => {}), clear: vi.fn() },
+  ClipboardItem: vi.fn(),
   session: { fromPartition: () => ({
     setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn(),
     setDevicePermissionHandler: vi.fn(), setDisplayMediaRequestHandler: vi.fn(),
@@ -21,7 +26,7 @@ const initialUrl = 'https://approved.test/start'
 
 it('holds the first foreign redirect of a reserved blank occurrence before network delivery', () => {
   const owner = Object.assign(new EventEmitter(), { id: 17, isDestroyed: () => false,
-    send: vi.fn() })
+    send: vi.fn<(channel: string, intent: { token: string }) => void>() })
   const contents = owner as Pick<WebContents, 'id' | 'isDestroyed' | 'send'> as WebContents
   const window = { webContents: contents } as BrowserWindow
   const guests = new DesktopBrowserGuests(() => undefined)

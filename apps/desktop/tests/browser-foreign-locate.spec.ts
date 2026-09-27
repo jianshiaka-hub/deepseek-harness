@@ -22,9 +22,9 @@ function fixture(foreign = true) {
     frames: [child], framesInSubtree: [] as unknown[],
     executeJavaScript: vi.fn(async () => descriptor) }
   top.framesInSubtree.push(top, child)
-  const guest: WebContents = Object.assign(Object.create(null), { mainFrame: top,
+  const guest = { mainFrame: top,
     isDestroyed: () => false, isLoadingMainFrame: () => false,
-    getURL: () => topUrl, getTitle: () => 'Top' })
+    getURL: () => topUrl, getTitle: () => 'Top' } as Pick<WebContents, 'getURL' | 'getTitle'> as WebContents
   return { guest, top, child }
 }
 

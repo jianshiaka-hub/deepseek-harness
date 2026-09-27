@@ -15,16 +15,26 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function frameScriptAvailable(frame: CaptureFrame): boolean {
+  const api: unknown = frame
+  return record(api) && typeof api.executeJavaScript === 'function'
+}
+
+function nativeFrameAvailable(frame: CaptureFrame): boolean {
+  const children: unknown = frame.frames
+  return frameScriptAvailable(frame) && Array.isArray(children)
+}
+
 interface ForeignFrameDescriptor {
   readonly src: string
   readonly name: string
 }
 
 function nativeFrameForDescriptor(parent: CaptureFrame, descriptor: ForeignFrameDescriptor): CaptureFrame {
-  const exact = parent.frames?.filter(frame => !frame.detached && frame.url === descriptor.src &&
-    frame.name === descriptor.name) ?? []
+  const exact = parent.frames.filter(frame => !frame.detached && frame.url === descriptor.src &&
+    frame.name === descriptor.name)
   const matches = exact.length === 0 && descriptor.name !== ''
-    ? parent.frames?.filter(frame => !frame.detached && frame.name === descriptor.name) ?? [] : exact
+    ? parent.frames.filter(frame => !frame.detached && frame.name === descriptor.name) : exact
   if (matches.length !== 1 || matches[0] === undefined) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
   return matches[0]
 }
@@ -34,7 +44,7 @@ async function resolveForeignFrame(parent: CaptureFrame, selector: string): Prom
   readonly frame: CaptureFrame
   readonly descriptor: ForeignFrameDescriptor
 }> {
-  if (parent.executeJavaScript === undefined || parent.frames === undefined) {
+  if (!nativeFrameAvailable(parent)) {
     throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
   }
   const raw = await parent.executeJavaScript(`(() => {
@@ -82,7 +92,7 @@ export async function locateBrowserForeignFrame(guest: WebContents, expectedUrl:
     }
   }
   if (!path.some(step => step.child.origin !== step.parent.origin)) return null
-  if (frame.executeJavaScript === undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+  if (!frameScriptAvailable(frame)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
   const raw = await frame.executeJavaScript(sidebarLocateCode(frame.url, foreignQuery))
   if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
     throw new Error('SIDEBAR_NAVIGATED')
@@ -154,15 +164,17 @@ export async function pointForBrowserForeignRef(guest: WebContents, expectedUrl:
   const id = Number(match[1])
   const frames = guest.mainFrame.framesInSubtree
   const leaf = frames.find(frame => frame.frameTreeNodeId === id)
-  if (leaf === undefined || leaf === guest.mainFrame || leaf.executeJavaScript === undefined) {
+  if (leaf === undefined || leaf === guest.mainFrame || !frameScriptAvailable(leaf)) {
     throw new Error('SIDEBAR_STALE_REF')
   }
   const chain: { parent: CaptureFrame; child: CaptureFrame }[] = []
   let current = leaf
   while (current !== guest.mainFrame) {
     const parent: CaptureFrame | null | undefined = current.parent
-    if (parent === undefined || parent === null || !frames.includes(parent) ||
-      chain.length >= 8 || !parent.frames?.includes(current)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    if (parent === null || !frames.includes(parent) ||
+      chain.length >= 8 || !nativeFrameAvailable(parent) || !parent.frames.includes(current)) {
+      throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    }
     chain.push({ parent, child: current })
     current = parent
   }
@@ -200,7 +212,7 @@ export async function pointForBrowserForeignRef(guest: WebContents, expectedUrl:
   let x = local.x
   let y = local.y
   for (const { parent, child } of chain) {
-    if (parent.executeJavaScript === undefined || parent.frames === undefined ||
+    if (!nativeFrameAvailable(parent) ||
       parent.frames.filter(frame => !frame.detached && frame.url === child.url &&
         frame.name === child.name).length !== 1) throw new Error('SIDEBAR_FRAME_AMBIGUOUS')
     const offset = await parent.executeJavaScript(`(() => {
@@ -603,7 +615,7 @@ export async function pointForBrowserDrag(guest: WebContents, expectedUrl: strin
   let localX = x
   let localY = y
   for (let depth = 0; depth <= 8; depth++) {
-    if (frame.executeJavaScript === undefined) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
+    if (!frameScriptAvailable(frame)) throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
     const raw = await frame.executeJavaScript(`(() => {
       if (location.href !== ${JSON.stringify(frame.url)}) throw new Error('SIDEBAR_NAVIGATED');
       const x = ${JSON.stringify(localX)}, y = ${JSON.stringify(localY)};
@@ -644,7 +656,7 @@ export async function pointForBrowserDrag(guest: WebContents, expectedUrl: strin
     if (raw.kind !== 'frame' || typeof raw.src !== 'string' || raw.src.length > 16_384 ||
       typeof raw.name !== 'string' || raw.name.length > 256 ||
       typeof raw.x !== 'number' || typeof raw.y !== 'number' ||
-      !Number.isFinite(raw.x) || !Number.isFinite(raw.y) || frame.frames === undefined) {
+      !Number.isFinite(raw.x) || !Number.isFinite(raw.y) || !nativeFrameAvailable(frame)) {
       throw new Error('SIDEBAR_FRAME_UNAVAILABLE')
     }
     frame = nativeFrameForDescriptor(frame, { src: raw.src, name: raw.name })

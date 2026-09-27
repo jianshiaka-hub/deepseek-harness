@@ -215,7 +215,8 @@ export interface BrowserJsDialog {
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
-  acquire(workspace: string, initialPreflight?: DesktopBrowserInitialPreflight | DesktopBrowserOccurrence): Promise<DesktopBrowserReservation>
+  acquire(workspace: string, initialPreflight?:
+    DesktopBrowserInitialPreflight | DesktopBrowserOccurrence): Promise<DesktopBrowserReservation>
   /** @param lease - the caller's reservation. @returns after its guest has been destroyed. */
   release(lease: DesktopBrowserLeaseId): Promise<void>
   /** Versioned host gate. Plugins may use it when present; older shells omit it. */
@@ -231,11 +232,18 @@ export interface DesktopBrowserBridge {
   /** Bounded read of currently loaded foreign frames; available only with a main-process guard. */
   readonly foreignFrameReadVersion?: 1
   auditFrames?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<{
-    readonly origins: readonly string[]; readonly fingerprint: string }>
+    readonly origins: readonly string[]
+    readonly fingerprint: string
+  }>
   inspectForeignText?(lease: DesktopBrowserLeaseId, expectedUrl: string,
-    approvedOrigins: readonly string[]): Promise<{ readonly fingerprint: string;
-      readonly frames: readonly { readonly origin: string; readonly text: string;
-        readonly roles: string }[] }>
+    approvedOrigins: readonly string[]): Promise<{
+    readonly fingerprint: string
+    readonly frames: readonly {
+      readonly origin: string
+      readonly text: string
+      readonly roles: string
+    }[]
+  }>
   /** Fixed locator in an explicitly selected, approved foreign frame. Null means the path stayed same-origin. */
   readonly foreignFrameLocateVersion?: 1
   locateForeign?(lease: DesktopBrowserLeaseId, expectedUrl: string,
@@ -268,10 +276,14 @@ export interface DesktopBrowserBridge {
   /** Short clipboard lease for one confirmed rich-text paste. */
   readonly richPasteVersion?: 1
   beginPaste?(lease: DesktopBrowserLeaseId, expectedUrl: string, payload: {
-    readonly text: string; readonly format: 'html'; readonly plainText: string
+    readonly text: string
+    readonly format: 'html'
+    readonly plainText: string
   }): Promise<string>
   finishPaste?(lease: DesktopBrowserLeaseId, token: string): Promise<{
-    readonly restored: boolean; readonly superseded: boolean }>
+    readonly restored: boolean
+    readonly superseded: boolean
+  }>
   foreignPasteState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
     phase: 'arm' | 'check' | 'result' | 'cleanup', receipt: string): Promise<BrowserForeignPasteState>
@@ -297,7 +309,9 @@ export interface DesktopBrowserBridge {
   readonly foreignFrameOptionVersion?: 1
   selectForeignOption?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[], options: readonly {
-      readonly value?: string; readonly label?: string; readonly index?: number
+      readonly value?: string
+      readonly label?: string
+      readonly index?: number
     }[]): Promise<BrowserForeignOptionResult>
   /** Fixed key target preflight and focus checks in one approved foreign frame. */
   readonly foreignFrameKeyVersion?: 1
@@ -308,7 +322,9 @@ export interface DesktopBrowserBridge {
   readonly foreignFrameSelectionVersion?: 1
   selectForeignText?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[], selection: {
-      readonly text: string; readonly prefix?: string; readonly suffix?: string;
+      readonly text: string
+      readonly prefix?: string
+      readonly suffix?: string
       readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
     }): Promise<BrowserForeignSelectionResult>
   /** Inspect or focus one approved foreign target for a fixed secondary action. */
@@ -316,15 +332,25 @@ export interface DesktopBrowserBridge {
   foreignSecondaryState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
     action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'):
-    Promise<BrowserForeignSecondaryState>
+  Promise<BrowserForeignSecondaryState>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,
-    clip: { readonly x: number; readonly y: number; readonly width: number;
-      readonly height: number } | undefined, fullPage: boolean,
-    approvedOrigins: readonly string[]): Promise<{ readonly url: string; readonly title: string;
-      readonly base64: string; readonly viewport: { readonly width: number;
-        readonly height: number } }>
+    clip: {
+      readonly x: number
+      readonly y: number
+      readonly width: number
+      readonly height: number
+    } | undefined, fullPage: boolean,
+    approvedOrigins: readonly string[]): Promise<{
+    readonly url: string
+    readonly title: string
+    readonly base64: string
+    readonly viewport: {
+      readonly width: number
+      readonly height: number
+    }
+  }>
   armNavigationPreflight?(lease: DesktopBrowserLeaseId, clientId: string, sessionId: string,
     tabId: string, navigationEpoch: number, expectedUrl: string): Promise<void>
   resolveNavigationPreflight?(token: string, allowed: boolean): Promise<void>

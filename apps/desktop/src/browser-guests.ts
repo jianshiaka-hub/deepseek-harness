@@ -41,7 +41,7 @@ type DialogGuest = Parameters<BrowserDialogLease['begin']>[0]
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
   private readonly leases = new Map<DesktopBrowserLeaseId, GuestLease>()
-  private readonly blankClaims = new Map<string, { readonly owner: WebContents;
+  private readonly blankClaims = new Map<string, { readonly owner: WebContents
     readonly value: DesktopBrowserInitialPreflight }>()
   private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
   private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
@@ -52,8 +52,10 @@ export class DesktopBrowserGuests {
   private readonly activeDialogs = new Map<DesktopBrowserLeaseId, string>()
   private readonly activeNavigations = new Set<string>()
   private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
-  private activeDrag: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId;
-    readonly token: string; readonly expectedUrl: string } | undefined
+  private activeDrag: { readonly owner: WebContents
+    readonly lease: DesktopBrowserLeaseId
+    readonly token: string
+    readonly expectedUrl: string } | undefined
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
   constructor(private readonly hostUrl: () => string | undefined,
@@ -496,15 +498,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await locateBrowserForeignFrame(guest, expectedUrl as string,
         query, approvedOrigins as string[])
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -523,15 +525,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await pointForBrowserForeignRef(guest, expectedUrl as string,
         ref, approvedOrigins as string[])
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -551,15 +553,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await stateForBrowserForeignInput(guest, expectedUrl as string,
         ref, approvedOrigins as string[], phase, value)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -578,15 +580,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await selectBrowserForeignOption(guest, expectedUrl as string,
         ref, approvedOrigins as string[], options)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -606,15 +608,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await stateForBrowserForeignKey(guest, expectedUrl as string,
         ref, approvedOrigins as string[], key, phase)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -633,15 +635,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await selectBrowserForeignText(guest, expectedUrl as string,
         ref, approvedOrigins as string[], selection)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -660,15 +662,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await stateForBrowserForeignSecondary(guest, expectedUrl as string,
         ref, approvedOrigins as string[], action)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -715,7 +717,7 @@ export class DesktopBrowserGuests {
       target.length > 16_384 || !this.allowedNavigation(target) ||
       new URL(target).href !== target)) throw new Error('SIDEBAR_DOWNLOAD_UNAVAILABLE')
     const guest = this.readableGuest(owner, id, expectedUrl)
-    return this.downloadLease.begin(guest, expectedUrl as string, target as string | undefined)
+    return this.downloadLease.begin(guest, expectedUrl as string, target)
   }
 
   /** Report a ticket's bounded state only to its owning guest and window. */
@@ -769,13 +771,13 @@ export class DesktopBrowserGuests {
     if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
       guest.isDestroyed() || guest.getURL() !== expectedUrl || guest.isLoadingMainFrame() ||
       this.activePaste !== undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
-    let changed = false
-    const invalidate = (): void => { changed = true }
+    const navigation = { changed: false }
+    const invalidate = (): void => { navigation.changed = true }
     guest.on('did-start-navigation', invalidate)
     guest.on('destroyed', invalidate)
     try {
       const token = await this.clipboardLease.begin(payload as PastePayload)
-      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
+      if (navigation.changed || this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
         guest.getURL() !== expectedUrl || owner.isDestroyed()) {
         await this.clipboardLease.finish(token)
         throw new Error('SIDEBAR_NAVIGATED')
@@ -809,15 +811,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await stateForBrowserForeignPaste(guest, expectedUrl as string,
         ref, approvedOrigins as string[], phase, receipt)
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
@@ -871,15 +873,15 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     const lease = this.leases.get(id as DesktopBrowserLeaseId)
-    let changed = false
-    const markChanged = (): void => { changed = true }
+    const navigation = { changed: false }
+    const markChanged = (): void => { navigation.changed = true }
     guest.on('frame-created', markChanged)
     guest.on('will-frame-navigate', markChanged)
     guest.on('did-navigate-in-page', markChanged)
     try {
       const result = await pointForBrowserDrag(guest, expectedUrl as string, x, y,
         approvedOrigins as string[])
-      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+      if (navigation.changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
     } finally {
