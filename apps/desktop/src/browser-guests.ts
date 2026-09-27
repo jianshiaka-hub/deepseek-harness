@@ -8,6 +8,8 @@ import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
 import { BrowserDragLease } from './browser-drag.ts'
 import { BrowserFileChooserLease, type BrowserFileChooserStatus } from './browser-filechooser.ts'
+import { BrowserDownloadLease } from './browser-download.ts'
+import type { BrowserDownloadStatus } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
@@ -41,6 +43,7 @@ export class DesktopBrowserGuests {
   private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
   private readonly dragLease = new BrowserDragLease()
   private readonly fileChooserLease = new BrowserFileChooserLease()
+  private readonly downloadLease = new BrowserDownloadLease()
   private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
   private activeDrag: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId;
     readonly token: string; readonly expectedUrl: string } | undefined
@@ -114,6 +117,7 @@ export class DesktopBrowserGuests {
     if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
     this.clearExpiredDrag()
     if (this.activeDrag?.lease === key) await this.finishDrag(owner, key, this.activeDrag.token)
+    if (lease.guest !== undefined) this.downloadLease.cancelGuest(lease.guest)
     if (lease.guest !== undefined) await this.fileChooserLease.cancelGuest(lease.guest)
     lease.releaseInput?.()
     this.leases.delete(key)
@@ -178,6 +182,7 @@ export class DesktopBrowserGuests {
           if (this.activeDrag?.lease === id) {
             void this.finishDrag(owner, id, this.activeDrag.token).catch(() => {})
           }
+          this.downloadLease.cancelGuest(guest)
           void this.fileChooserLease.cancelGuest(guest).catch(() => {})
           lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id)
         })
@@ -242,7 +247,9 @@ export class DesktopBrowserGuests {
     browserSession.setPermissionCheckHandler(() => false)
     browserSession.setDevicePermissionHandler(() => false)
     browserSession.setDisplayMediaRequestHandler((_request, callback) => { callback({}) })
-    browserSession.on('will-download', (event) => { event.preventDefault() })
+    browserSession.on('will-download', (event, item, contents) => {
+      if (!this.downloadLease.offer(item, contents)) event.preventDefault()
+    })
     browserSession.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url)
       const network = ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)
@@ -492,7 +499,6 @@ export class DesktopBrowserGuests {
     }
   }
 
-  /** Stage one short, bounded HTML paste for the caller's live exact-URL guest. */
   /** Intercept one native file input for this owned, exact-URL guest. */
   async beginFileChooser(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
     const guest = this.readableGuest(owner, id, expectedUrl)
@@ -524,6 +530,52 @@ export class DesktopBrowserGuests {
     await this.fileChooserLease.cancel(token as string)
   }
 
+  /** Arm only the caller's live, exact-URL guest for its next download. */
+  beginDownload(owner: WebContents, id: unknown, expectedUrl: unknown, target?: unknown): string {
+    if (target !== undefined && (typeof target !== 'string' ||
+      target.length > 16_384 || !this.allowedNavigation(target) ||
+      new URL(target).href !== target)) throw new Error('SIDEBAR_DOWNLOAD_UNAVAILABLE')
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    return this.downloadLease.begin(guest, expectedUrl as string, target as string | undefined)
+  }
+
+  /** Report a ticket's bounded state only to its owning guest and window. */
+  pollDownload(owner: WebContents, id: unknown, token: unknown): BrowserDownloadStatus {
+    const guest = typeof id === 'string' ? this.leases.get(id as DesktopBrowserLeaseId)?.guest : undefined
+    if (typeof token !== 'string' || guest === undefined ||
+      this.leases.get(id as DesktopBrowserLeaseId)?.owner !== owner ||
+      !this.downloadLease.owns(token, guest)) throw new Error('SIDEBAR_DOWNLOAD_LEASE_UNAVAILABLE')
+    return this.downloadLease.poll(token)
+  }
+
+  /** Resume only after the plugin obtained every exact source and redirect origin. */
+  resumeDownload(owner: WebContents, id: unknown, token: unknown, origins: unknown): void {
+    if (!Array.isArray(origins) || origins.length < 1 || origins.length > 16 ||
+      origins.some(origin => typeof origin !== 'string' || !URL.canParse(origin) ||
+        !['http:', 'https:'].includes(new URL(origin).protocol) || new URL(origin).origin !== origin)) {
+      throw new Error('SIDEBAR_DOWNLOAD_SITE_NOT_APPROVED')
+    }
+    this.pollDownload(owner, id, token)
+    this.downloadLease.resume(token as string, origins as string[])
+  }
+
+  /** Cancel one owned ticket and remove its unconsumed private output. */
+  cancelDownload(owner: WebContents, id: unknown, token: unknown): void {
+    const lease = typeof id === 'string' ? this.leases.get(id as DesktopBrowserLeaseId) : undefined
+    if (typeof token !== 'string' || lease?.owner !== owner || lease.guest === undefined ||
+      !this.downloadLease.owns(token, lease.guest)) throw new Error('SIDEBAR_DOWNLOAD_LEASE_UNAVAILABLE')
+    this.downloadLease.cancel(token)
+  }
+
+  /** Release a completed ticket while retaining its approved file for the caller. */
+  finishDownload(owner: WebContents, id: unknown, token: unknown): void {
+    if (this.pollDownload(owner, id, token).state !== 'completed') {
+      throw new Error('SIDEBAR_DOWNLOAD_LEASE_UNAVAILABLE')
+    }
+    this.downloadLease.finish(token as string)
+  }
+
+  /** Stage one short, bounded HTML paste for the caller's live exact-URL guest. */
   async beginPaste(owner: WebContents, id: unknown, expectedUrl: unknown, payload: unknown): Promise<string> {
     this.clearExpiredPaste()
     if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||

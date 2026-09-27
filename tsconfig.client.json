@@ -22,6 +22,7 @@
     "apps/desktop/src/browser-clipboard.ts",
     "apps/desktop/src/browser-drag.ts",
     "apps/desktop/src/browser-filechooser.ts",
+    "apps/desktop/src/browser-download.ts",
     "apps/desktop/src/browser-navigation-preflight.ts",
     "apps/desktop/src/browser-foreign-read.ts",
     "apps/desktop/src/browser-foreign-locate.ts",

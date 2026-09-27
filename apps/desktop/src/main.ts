@@ -722,6 +722,28 @@ async function main(): Promise<void> {
     return browserGuests.foreignInputState(event.sender, lease, expectedUrl, ref,
       approvedOrigins, phase, value)
   })
+  ipcMain.handle(DESKTOP_IPC.browserDownloadBegin, (event, lease: unknown, expectedUrl: unknown,
+    target?: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginDownload(event.sender, lease, expectedUrl, target)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDownloadPoll, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.pollDownload(event.sender, lease, token)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDownloadResume, (event, lease: unknown, token: unknown,
+    origins: unknown) => {
+    assertProductSender(event)
+    browserGuests.resumeDownload(event.sender, lease, token, origins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDownloadCancel, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    browserGuests.cancelDownload(event.sender, lease, token)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDownloadFinish, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    browserGuests.finishDownload(event.sender, lease, token)
+  })
   ipcMain.handle(DESKTOP_IPC.browserFileChooserBegin, (event, lease: unknown, expectedUrl: unknown) => {
     assertProductSender(event)
     return browserGuests.beginFileChooser(event.sender, lease, expectedUrl)

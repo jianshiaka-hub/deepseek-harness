@@ -31,6 +31,13 @@ export interface DesktopBrowserOpenRequest {
   readonly url: string
 }
 
+/** Paused download status; the private path is revealed only after all origins are approved. */
+export type BrowserDownloadStatus =
+  | { readonly state: 'waiting' }
+  | { readonly state: 'offered'; readonly origins: readonly string[] }
+  | { readonly state: 'completed'; readonly path: string; readonly filename: string }
+  | { readonly state: 'failed'; readonly reason: string }
+
 /** Bounded status of one intercepted native file input. */
 export type BrowserFileChooserStatus =
   | { readonly state: 'waiting' }
@@ -237,6 +244,13 @@ export interface DesktopBrowserBridge {
     value?: string): Promise<BrowserForeignInputState>
   /** Extends foreignInputState with focus/check phases for append typing. */
   readonly foreignFrameTypeVersion?: 1
+  /** Next native download from the exact selected Browser guest. */
+  readonly downloadVersion?: 1
+  beginDownload?(lease: DesktopBrowserLeaseId, expectedUrl: string, target?: string): Promise<string>
+  pollDownload?(lease: DesktopBrowserLeaseId, token: string): Promise<BrowserDownloadStatus>
+  resumeDownload?(lease: DesktopBrowserLeaseId, token: string, origins: readonly string[]): Promise<void>
+  cancelDownload?(lease: DesktopBrowserLeaseId, token: string): Promise<void>
+  finishDownload?(lease: DesktopBrowserLeaseId, token: string): Promise<void>
   /** One intercepted native file input for an approved selected guest. */
   readonly fileChooserVersion?: 1
   beginFileChooser?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
