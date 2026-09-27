@@ -169,6 +169,15 @@ export interface BrowserForeignSelectionResult {
   readonly selected: true
 }
 
+/** Bounded state for one fixed secondary action in an approved foreign frame. */
+export interface BrowserForeignSecondaryState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly expanded?: 'true' | 'false'
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -226,6 +235,12 @@ export interface DesktopBrowserBridge {
       readonly text: string; readonly prefix?: string; readonly suffix?: string;
       readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
     }): Promise<BrowserForeignSelectionResult>
+  /** Inspect or focus one approved foreign target for a fixed secondary action. */
+  readonly foreignFrameSecondaryVersion?: 1
+  foreignSecondaryState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    action: 'focus' | 'showmenu' | 'expand' | 'collapse' | 'increment' | 'decrement'):
+    Promise<BrowserForeignSecondaryState>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

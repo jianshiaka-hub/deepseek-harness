@@ -10,11 +10,13 @@ import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
-  stateForBrowserForeignKey, selectBrowserForeignText } from './browser-foreign-locate.ts'
+  stateForBrowserForeignKey, selectBrowserForeignText,
+  stateForBrowserForeignSecondary } from './browser-foreign-locate.ts'
 import type { BrowserLocateResult, BrowserForeignRefPoint,
   BrowserForeignInputState, BrowserForeignOptionResult,
   BrowserForeignKeyState,
-  BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignSelectionResult,
+  BrowserForeignSecondaryState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -418,6 +420,33 @@ export class DesktopBrowserGuests {
     try {
       const result = await selectBrowserForeignText(guest, expectedUrl as string,
         ref, approvedOrigins as string[], selection)
+      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+        lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  /** Revalidate one approved foreign secondary target under the current owner lease. */
+  async foreignSecondaryState(owner: WebContents, id: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, action: unknown): Promise<BrowserForeignSecondaryState> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 || approvedOrigins.length > 100 ||
+      approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await stateForBrowserForeignSecondary(guest, expectedUrl as string,
+        ref, approvedOrigins as string[], action)
       if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result

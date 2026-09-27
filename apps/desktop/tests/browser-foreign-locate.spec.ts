@@ -2,7 +2,8 @@ import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
-  stateForBrowserForeignKey, selectBrowserForeignText } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignKey, selectBrowserForeignText,
+  stateForBrowserForeignSecondary } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -169,4 +170,23 @@ it('selects one exact foreign text occurrence without exporting the page value',
   expect(code).toContain('return {selected:true}')
   await expect(selectBrowserForeignText(h.guest, topUrl, ref, sites,
     { text: 'unique', selectionType: 'all' })).rejects.toThrow('SIDEBAR_SELECTION_UNAVAILABLE')
+})
+
+it('checks fixed secondary actions only in an approved foreign target', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ expanded: 'false' }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:button:Open`
+  await expect(stateForBrowserForeignSecondary(h.guest, topUrl, ref, [sites[0]!], 'expand'))
+    .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+  await expect(stateForBrowserForeignSecondary(h.guest, topUrl, ref, sites, 'expand'))
+    .resolves.toMatchObject({ url: topUrl, origin: sites[1], expanded: 'false' })
+  const code = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(code).toContain('SIDEBAR_ACTION_NOT_EXPOSED')
+  expect(code).toContain("node.type === 'password'")
+  expect(code).toContain("node.getAttribute('aria-expanded')")
+  await expect(stateForBrowserForeignSecondary(h.guest, topUrl, ref, sites, 'delete'))
+    .rejects.toThrow('SIDEBAR_ACTION_UNAVAILABLE')
 })
