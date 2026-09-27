@@ -3,7 +3,7 @@ import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
   stateForBrowserForeignKey, selectBrowserForeignText,
-  stateForBrowserForeignSecondary } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignSecondary, stateForBrowserForeignPaste } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -189,4 +189,26 @@ it('checks fixed secondary actions only in an approved foreign target', async ()
   expect(code).toContain("node.getAttribute('aria-expanded')")
   await expect(stateForBrowserForeignSecondary(h.guest, topUrl, ref, sites, 'delete'))
     .rejects.toThrow('SIDEBAR_ACTION_UNAVAILABLE')
+})
+
+it('arms an approved foreign rich-paste receipt and requires a trusted paste and input', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ hadText: false, pasteConfirmed: false })
+    .mockResolvedValueOnce({ hadText: true, pasteConfirmed: true }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:textbox:Editor`
+  const receipt = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  await expect(stateForBrowserForeignPaste(h.guest, topUrl, ref, sites, 'arm', receipt))
+    .resolves.toMatchObject({ origin: sites[1], pasteConfirmed: false })
+  const armCode = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(armCode).toContain('event.isTrusted')
+  expect(armCode).toContain("document.addEventListener('paste'")
+  expect(armCode).toContain("document.addEventListener('input'")
+  expect(armCode).toContain("!['text','search','email','url','tel','number'].includes(node.type)")
+  await expect(stateForBrowserForeignPaste(h.guest, topUrl, ref, sites, 'result', receipt))
+    .resolves.toMatchObject({ pasteConfirmed: true })
+  await expect(stateForBrowserForeignPaste(h.guest, topUrl, ref, sites, 'arm', 'bad'))
+    .rejects.toThrow('SIDEBAR_PASTE_UNAVAILABLE')
 })

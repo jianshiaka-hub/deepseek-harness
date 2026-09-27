@@ -1,22 +1,23 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
-import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { app, clipboard, ClipboardItem, session, type BrowserWindow, type Session, type WebContents } from 'electron'
 import type { DesktopBrowserInitialPreflight, DesktopBrowserOccurrence, DesktopBrowserLeaseId, DesktopBrowserOpenRequest,
   DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
+import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
   stateForBrowserForeignKey, selectBrowserForeignText,
-  stateForBrowserForeignSecondary } from './browser-foreign-locate.ts'
+  stateForBrowserForeignSecondary, stateForBrowserForeignPaste } from './browser-foreign-locate.ts'
 import type { BrowserLocateResult, BrowserForeignRefPoint,
   BrowserForeignInputState, BrowserForeignOptionResult,
   BrowserForeignKeyState,
   BrowserForeignSelectionResult,
-  BrowserForeignSecondaryState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignSecondaryState, BrowserForeignPasteState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -35,9 +36,17 @@ export class DesktopBrowserGuests {
   private readonly blankClaims = new Map<string, { readonly owner: WebContents;
     readonly value: DesktopBrowserInitialPreflight }>()
   private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
+  private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
+  private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
   constructor(private readonly hostUrl: () => string | undefined) {}
+
+  private clearExpiredPaste(): void {
+    if (this.activePaste !== undefined && this.clipboardLease.activeToken !== this.activePaste.token) {
+      this.activePaste = undefined
+    }
+  }
 
   /**
    * Reserve one guest in a workspace's process-lifetime partition.
@@ -89,6 +98,8 @@ export class DesktopBrowserGuests {
     const lease = this.leases.get(key)
     if (lease === undefined) return
     if (lease.owner !== owner) throw new Error('desktop browser: guest belongs to another window')
+    this.clearExpiredPaste()
+    if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
     lease.releaseInput?.()
     this.leases.delete(key)
     const guest = lease.guest
@@ -145,7 +156,12 @@ export class DesktopBrowserGuests {
         lease.guest = guest
         attachedLease = id
         lease.releaseInput = attachInput(guest, id)
-        guest.once('destroyed', () => { lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id) })
+        guest.once('destroyed', () => {
+          if (this.activePaste?.lease === id) {
+            void this.finishPaste(owner, id, this.activePaste.token).catch(() => {})
+          }
+          lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id)
+        })
         if (lease.initialPreflight !== undefined) {
           const claim = lease.initialPreflight
           try {
@@ -447,6 +463,79 @@ export class DesktopBrowserGuests {
     try {
       const result = await stateForBrowserForeignSecondary(guest, expectedUrl as string,
         ref, approvedOrigins as string[], action)
+      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+        lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  /** Stage one short, bounded HTML paste for the caller's live exact-URL guest. */
+  async beginPaste(owner: WebContents, id: unknown, expectedUrl: unknown, payload: unknown): Promise<string> {
+    this.clearExpiredPaste()
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||
+      typeof payload !== 'object' || payload === null || Array.isArray(payload) ||
+      Object.keys(payload).some(key => !['text', 'format', 'plainText'].includes(key)) ||
+      !('text' in payload) || !('format' in payload) || !('plainText' in payload) ||
+      typeof payload.text !== 'string' || payload.format !== 'html' ||
+      typeof payload.plainText !== 'string') throw new Error('SIDEBAR_PASTE_UNAVAILABLE')
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.getURL() !== expectedUrl || guest.isLoadingMainFrame() ||
+      this.activePaste !== undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    let changed = false
+    const invalidate = (): void => { changed = true }
+    guest.on('did-start-navigation', invalidate)
+    guest.on('destroyed', invalidate)
+    try {
+      const token = await this.clipboardLease.begin(payload as PastePayload)
+      if (changed || this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
+        guest.getURL() !== expectedUrl || owner.isDestroyed()) {
+        await this.clipboardLease.finish(token)
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      this.activePaste = { owner, lease: key, token }
+      return token
+    } finally {
+      guest.off('did-start-navigation', invalidate)
+      guest.off('destroyed', invalidate)
+    }
+  }
+
+  /** Restore the saved formats unless a newer copy replaced the staged paste. */
+  async finishPaste(owner: WebContents, id: unknown, token: unknown): Promise<RestoreResult> {
+    this.clearExpiredPaste()
+    const active = this.activePaste
+    if (typeof id !== 'string' || typeof token !== 'string' || active === undefined ||
+      active.owner !== owner || active.lease !== id || active.token !== token) {
+      throw new Error('SIDEBAR_CLIPBOARD_LEASE_UNAVAILABLE')
+    }
+    try { return await this.clipboardLease.finish(token) }
+    finally { if (this.activePaste === active) this.activePaste = undefined }
+  }
+
+  /** Arm or inspect a trusted paste receipt inside one approved foreign frame. */
+  async foreignPasteState(owner: WebContents, id: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, phase: unknown, receipt: unknown): Promise<BrowserForeignPasteState> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 || approvedOrigins.length > 100 ||
+      approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await stateForBrowserForeignPaste(guest, expectedUrl as string,
+        ref, approvedOrigins as string[], phase, receipt)
       if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result

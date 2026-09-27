@@ -42,6 +42,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignFramePointVersion: 1,
     foreignFrameInputVersion: 1,
     foreignFrameTypeVersion: 1,
+    richPasteVersion: 1,
     foreignFrameOptionVersion: 1,
     foreignFrameKeyVersion: 1,
     foreignFrameSelectionVersion: 1,
@@ -69,6 +70,13 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignInputState: (lease, expectedUrl, ref, approvedOrigins, phase, value) => ipcRenderer.invoke(
       DESKTOP_IPC.browserForeignInputState, lease, expectedUrl, ref, approvedOrigins, phase, value) as
       ReturnType<NonNullable<DesktopBrowserBridge['foreignInputState']>>,
+    beginPaste: (lease, expectedUrl, payload) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteBegin,
+      lease, expectedUrl, payload) as ReturnType<NonNullable<DesktopBrowserBridge['beginPaste']>>,
+    finishPaste: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteEnd,
+      lease, token) as ReturnType<NonNullable<DesktopBrowserBridge['finishPaste']>>,
+    foreignPasteState: (lease, expectedUrl, ref, approvedOrigins, phase, receipt) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserForeignPasteState, lease, expectedUrl, ref, approvedOrigins, phase, receipt) as
+      ReturnType<NonNullable<DesktopBrowserBridge['foreignPasteState']>>,
     selectForeignOption: (lease, expectedUrl, ref, approvedOrigins, options) => ipcRenderer.invoke(
       DESKTOP_IPC.browserSelectForeignOption, lease, expectedUrl, ref, approvedOrigins, options) as
       ReturnType<NonNullable<DesktopBrowserBridge['selectForeignOption']>>,

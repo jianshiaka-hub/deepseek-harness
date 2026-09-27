@@ -142,6 +142,11 @@ export interface BrowserForeignInputState {
   readonly hadText: boolean
 }
 
+/** Trusted native paste receipt for one approved foreign editor. */
+export interface BrowserForeignPasteState extends BrowserForeignInputState {
+  readonly pasteConfirmed: boolean
+}
+
 /** Confirmed values of one approved foreign select, bounded for the plugin. */
 export interface BrowserForeignOptionResult {
   readonly url: string
@@ -217,6 +222,16 @@ export interface DesktopBrowserBridge {
     value?: string): Promise<BrowserForeignInputState>
   /** Extends foreignInputState with focus/check phases for append typing. */
   readonly foreignFrameTypeVersion?: 1
+  /** Short clipboard lease for one confirmed rich-text paste. */
+  readonly richPasteVersion?: 1
+  beginPaste?(lease: DesktopBrowserLeaseId, expectedUrl: string, payload: {
+    readonly text: string; readonly format: 'html'; readonly plainText: string
+  }): Promise<string>
+  finishPaste?(lease: DesktopBrowserLeaseId, token: string): Promise<{
+    readonly restored: boolean; readonly superseded: boolean }>
+  foreignPasteState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[],
+    phase: 'arm' | 'check' | 'result' | 'cleanup', receipt: string): Promise<BrowserForeignPasteState>
   /** Fixed exact-option selection in one approved foreign frame. */
   readonly foreignFrameOptionVersion?: 1
   selectForeignOption?(lease: DesktopBrowserLeaseId, expectedUrl: string,
