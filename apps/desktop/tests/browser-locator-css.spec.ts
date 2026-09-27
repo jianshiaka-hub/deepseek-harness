@@ -23,4 +23,5 @@ it('matches nested has-text and CSS-escaped strings in an approved frame', () =>
   expect(count(String.raw`article:has-text("C\61 t"):nth-of-type(1)`)).toBe(1)
   expect(count(String.raw`article:has(div:has-text("missing"))`)).toBe(0)
   expect(count(String.raw`article:has-text("say" "hi")`)).toBe(0)
+  expect(count('article:has(> div):first-child')).toBe(1)
 })

@@ -218,6 +218,8 @@ export const guestDomHelpers = String.raw`
       const sidebarMatchesCSS = (node,selector) => {
         const matchesPart = (candidate,part,depth=0) => {
           if (depth > 16) throw new Error('SIDEBAR_DOM_LIMIT');
+          try { if (candidate.matches(part)) return true; }
+          catch { /* Browser CSS does not parse Playwright-only text pseudo-classes. */ }
           const pseudo = sidebarCssPseudo(part);
           if (pseudo) {
             if (pseudo.rest && !matchesPart(candidate,pseudo.rest,depth+1)) return false;
