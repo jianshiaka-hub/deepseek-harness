@@ -24,6 +24,7 @@ export const DESKTOP_IPC = {
   browserBlankNavigationPreflightCancel: 'dsh-desktop:browser-blank-navigation-preflight-cancel',
   browserAuditFrames: 'dsh-desktop:browser-audit-frames',
   browserInspectForeignText: 'dsh-desktop:browser-inspect-foreign-text',
+  browserLocateForeign: 'dsh-desktop:browser-locate-foreign',
   browserCaptureFrameAware: 'dsh-desktop:browser-capture-frame-aware',
   browserNavigationPreflightResolve: 'dsh-desktop:browser-navigation-preflight-resolve',
   browserNavigationIntent: 'dsh-desktop:browser-navigation-intent',

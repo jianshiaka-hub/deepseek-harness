@@ -46,6 +46,81 @@ export interface DesktopBrowserNavigationIntent {
   readonly popupInitialUrl?: string
 }
 
+/** A bounded string or serialized regular expression for approved locator matching. */
+export type BrowserTextPattern = string | { readonly __cu: 'regexp'; readonly source: string; readonly flags: string }
+
+/** One bounded selector and optional local filter over the approved document. */
+export interface BrowserLocateSelector {
+  readonly method: 'getByRole' | 'locator' | 'getByText' | 'getByLabel' | 'getByPlaceholder' | 'getByAltText' | 'getByTitle' | 'getByTestId'
+  readonly value: BrowserTextPattern
+  readonly name?: BrowserTextPattern
+  readonly description?: BrowserTextPattern
+  readonly exact: boolean
+  readonly includeHidden?: boolean
+  readonly checked?: boolean
+  readonly disabled?: boolean
+  readonly expanded?: boolean
+  readonly level?: number
+  readonly pressed?: boolean
+  readonly selected?: boolean
+  readonly filter?: {
+    readonly hasText?: BrowserTextPattern
+    readonly hasNotText?: BrowserTextPattern
+    readonly visible?: boolean
+    readonly has?: BrowserRelativeLocateQuery
+    readonly hasNot?: BrowserRelativeLocateQuery
+  }
+}
+
+/** Local filters within a relative locator; descendant queries are bounded by validation depth. */
+export interface BrowserRelativeLocateFilter {
+  readonly hasText?: BrowserTextPattern
+  readonly hasNotText?: BrowserTextPattern
+  readonly visible?: boolean
+  readonly has?: BrowserRelativeLocateQuery
+  readonly hasNot?: BrowserRelativeLocateQuery
+}
+
+/** One selector inside a candidate; no nested frame or positional selector. */
+export type BrowserRelativeLocateSelector = Omit<BrowserLocateSelector, 'filter'> & {
+  readonly filter?: BrowserRelativeLocateFilter
+}
+
+/** Up to three relative selector steps inside each candidate element. */
+export type BrowserRelativeLocateQuery = BrowserRelativeLocateSelector & {
+  readonly scopes?: readonly BrowserRelativeLocateSelector[]
+}
+
+/** A selector chain within the top document or explicit same-origin frames. */
+export interface BrowserLocateQuery extends BrowserLocateSelector {
+  readonly frames?: readonly string[]
+  readonly scopes?: readonly BrowserLocateSelector[]
+  readonly projection?: 'visible' | 'enabled' | 'checked' | 'text' | 'textContent' | 'allTextContents' | 'attribute' | 'downloadUrl'
+  readonly attributeName?: string
+  readonly position?: { readonly method: 'first' | 'last' | 'nth'; readonly index?: number }
+  readonly combine?: { readonly method: 'and' | 'or'; readonly query: BrowserLocateQuery }
+}
+
+/** Count, at most one document-bound reference, or a bounded ordered text list. */
+export interface BrowserLocateResult {
+  readonly url: string
+  readonly title: string
+  readonly count: number
+  readonly texts?: readonly string[]
+  readonly rows: readonly {
+    readonly ref: string
+    readonly role: string
+    readonly name: string
+    readonly visible?: boolean
+    readonly enabled?: boolean
+    readonly checked?: boolean
+    readonly text?: string
+    readonly textContent?: string
+    readonly attribute?: string | null
+    readonly downloadUrl?: string
+  }[]
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -70,6 +145,10 @@ export interface DesktopBrowserBridge {
     approvedOrigins: readonly string[]): Promise<{ readonly fingerprint: string;
       readonly frames: readonly { readonly origin: string; readonly text: string;
         readonly roles: string }[] }>
+  /** Fixed locator in an explicitly selected, approved foreign frame. Null means the path stayed same-origin. */
+  readonly foreignFrameLocateVersion?: 1
+  locateForeign?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    query: BrowserLocateQuery, approvedOrigins: readonly string[]): Promise<BrowserLocateResult | null>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

@@ -21,6 +21,8 @@
     "apps/desktop/src/browser-guests.ts",
     "apps/desktop/src/browser-navigation-preflight.ts",
     "apps/desktop/src/browser-foreign-read.ts",
+    "apps/desktop/src/browser-foreign-locate.ts",
+    "apps/desktop/src/browser-locator-script.ts",
     "apps/desktop/src/ipc.ts",
     "apps/desktop/src/update-overlay.ts",
     "apps/desktop/tests/**/*.client.spec.tsx",
