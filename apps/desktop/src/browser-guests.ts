@@ -8,8 +8,10 @@ import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
-import { locateBrowserForeignFrame, pointForBrowserForeignRef } from './browser-foreign-locate.ts'
-import type { BrowserLocateResult, BrowserForeignRefPoint } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import { locateBrowserForeignFrame, pointForBrowserForeignRef,
+  stateForBrowserForeignInput } from './browser-foreign-locate.ts'
+import type { BrowserLocateResult, BrowserForeignRefPoint,
+  BrowserForeignInputState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -303,6 +305,34 @@ export class DesktopBrowserGuests {
     try {
       const result = await pointForBrowserForeignRef(guest, expectedUrl as string,
         ref, approvedOrigins as string[])
+      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+        lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  /** Focus or verify one approved foreign text field under the current owner lease. */
+  async foreignInputState(owner: WebContents, id: unknown, expectedUrl: unknown,
+    ref: unknown, approvedOrigins: unknown, phase: unknown,
+    value: unknown): Promise<BrowserForeignInputState> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 || approvedOrigins.length > 100 ||
+      approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await stateForBrowserForeignInput(guest, expectedUrl as string,
+        ref, approvedOrigins as string[], phase, value)
       if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result

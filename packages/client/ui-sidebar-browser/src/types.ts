@@ -133,6 +133,15 @@ export interface BrowserForeignRefPoint {
   readonly targetUrl: string | null
 }
 
+/** Verified focus state for one approved foreign text field; excludes its value. */
+export interface BrowserForeignInputState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly hadText: boolean
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -165,6 +174,11 @@ export interface DesktopBrowserBridge {
   readonly foreignFramePointVersion?: 1
   foreignRefPoint?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
+  /** Focus or verify one visible, approved foreign text field without exporting its value. */
+  readonly foreignFrameInputVersion?: 1
+  foreignInputState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify',
+    value?: string): Promise<BrowserForeignInputState>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

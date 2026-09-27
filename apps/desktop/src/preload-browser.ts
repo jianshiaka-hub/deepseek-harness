@@ -40,6 +40,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignFrameReadVersion: 1,
     foreignFrameLocateVersion: 1,
     foreignFramePointVersion: 1,
+    foreignFrameInputVersion: 1,
     foreignFrameCaptureVersion: 1,
     acquire: (workspace, initialPreflight) => ipcRenderer.invoke(DESKTOP_IPC.browserAcquire,
       workspace, initialPreflight) as ReturnType<DesktopBrowserBridge['acquire']>,
@@ -60,6 +61,9 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignRefPoint: (lease, expectedUrl, ref, approvedOrigins) => ipcRenderer.invoke(
       DESKTOP_IPC.browserForeignRefPoint, lease, expectedUrl, ref, approvedOrigins) as
       ReturnType<NonNullable<DesktopBrowserBridge['foreignRefPoint']>>,
+    foreignInputState: (lease, expectedUrl, ref, approvedOrigins, phase, value) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserForeignInputState, lease, expectedUrl, ref, approvedOrigins, phase, value) as
+      ReturnType<NonNullable<DesktopBrowserBridge['foreignInputState']>>,
     captureFrameAware: (lease, expectedUrl, clip, fullPage, approvedOrigins) => ipcRenderer.invoke(
       DESKTOP_IPC.browserCaptureFrameAware, lease, expectedUrl, clip, fullPage, approvedOrigins) as
       ReturnType<NonNullable<DesktopBrowserBridge['captureFrameAware']>>,

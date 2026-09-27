@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
-import { locateBrowserForeignFrame, pointForBrowserForeignRef } from '../src/browser-foreign-locate.ts'
+import { locateBrowserForeignFrame, pointForBrowserForeignRef,
+  stateForBrowserForeignInput } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -80,4 +81,22 @@ it('maps a fresh foreign ref into the guest viewport and carries its checked lin
   const unsafeRef = `x2-${auditBrowserFrames(unsafe.guest, topUrl, sites).fingerprint}/d4-1234abcd:button:Open`
   await expect(pointForBrowserForeignRef(unsafe.guest, topUrl, unsafeRef, sites))
     .rejects.toThrow('SIDEBAR_POINT_UNAVAILABLE')
+})
+
+it('focuses a verified foreign text field and returns only input state', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ hadText: true }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:textbox:Name`
+  await expect(stateForBrowserForeignInput(h.guest, topUrl, ref, sites, 'select', undefined))
+    .resolves.toMatchObject({ url: topUrl, origin: sites[1], hadText: true })
+  const code = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(code).toContain("['text','search','url','tel']")
+  expect(code).toContain('node.readOnly')
+  expect(code).toContain('node.select()')
+  expect(code).not.toContain('return {value:')
+  await expect(stateForBrowserForeignInput(h.guest, topUrl, ref, sites, 'verify', 5))
+    .rejects.toThrow('SIDEBAR_INPUT_UNAVAILABLE')
 })

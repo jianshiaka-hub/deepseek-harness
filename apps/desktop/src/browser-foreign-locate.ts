@@ -1,6 +1,7 @@
 /** Fixed bounded locator for one explicitly selected, site-approved cross-origin frame. */
 import type { WebContents } from 'electron'
-import type { BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint,
+  BrowserForeignInputState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from './browser-locator-script.ts'
 import { auditBrowserFrames } from './browser-foreign-read.ts'
 
@@ -229,4 +230,45 @@ export async function pointForBrowserForeignRef(guest: WebContents, expectedUrl:
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), x, y,
     fingerprint: before, origin: leaf.origin, targetUrl: local.targetUrl }
+}
+
+/** Focus or verify an approved text field in its own native frame; never return its contents. */
+export async function stateForBrowserForeignInput(guest: WebContents, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], phase: unknown,
+  value: unknown): Promise<BrowserForeignInputState> {
+  if (!['select', 'verify'].includes(phase as string) ||
+    phase === 'select' && value !== undefined ||
+    phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) {
+    throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
+  }
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x(\d{1,10})-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === Number(match[1]))
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
+    if (frames.length !== 0 || !node.isConnected ||
+      !['INPUT','TEXTAREA'].includes(node.tagName) ||
+      node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type) ||
+      node.disabled || node.readOnly) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    ${phase === 'select' ? `node.focus();
+    if (sidebarActiveElement(document) !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    node.select();
+    if (node.selectionStart !== 0 || node.selectionEnd !== node.value.length) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }` : `if (sidebarActiveElement(document) !== node ||
+      node.value !== ${JSON.stringify(value)}) throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED');`}
+    return {hadText:node.value.length > 0};
+  })()`)
+  if (!record(raw) || typeof raw.hadText !== 'boolean' ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_NAVIGATED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint, hadText: raw.hadText }
 }
