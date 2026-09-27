@@ -3,7 +3,7 @@ import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
   stateForBrowserForeignKey, selectBrowserForeignText,
-  stateForBrowserForeignSecondary, stateForBrowserForeignPaste } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignSecondary, stateForBrowserForeignPaste, pointForBrowserDrag } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -211,4 +211,20 @@ it('arms an approved foreign rich-paste receipt and requires a trusted paste and
     .resolves.toMatchObject({ pasteConfirmed: true })
   await expect(stateForBrowserForeignPaste(h.guest, topUrl, ref, sites, 'arm', 'bad'))
     .rejects.toThrow('SIDEBAR_PASTE_UNAVAILABLE')
+})
+
+it('checks drag pixels against the approved and uniquely bound native foreign frame', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top,
+    executeJavaScript: vi.fn(async () => ({ kind: 'hit', fingerprint: 'DIV|source' })) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ kind: 'frame',
+    src: childUrl, name: 'widget', x: 12, y: 9 })) })
+  await expect(pointForBrowserDrag(h.guest, topUrl, 40, 60, [sites[0]!]))
+    .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+  const point = await pointForBrowserDrag(h.guest, topUrl, 40, 60, sites)
+  expect(point).toMatchObject({ url: topUrl, origin: sites[1] })
+  expect(point.targetFingerprint).toMatch(/^[a-f0-9]{64}$/u)
+  h.top.frames.push({ ...h.child, frameTreeNodeId: 3 })
+  await expect(pointForBrowserDrag(h.guest, topUrl, 40, 60, sites))
+    .rejects.toThrow('SIDEBAR_FRAME_AMBIGUOUS')
 })

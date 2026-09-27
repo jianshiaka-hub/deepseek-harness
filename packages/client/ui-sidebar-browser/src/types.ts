@@ -183,6 +183,15 @@ export interface BrowserForeignSecondaryState {
   readonly expanded?: 'true' | 'false'
 }
 
+/** Opaque hit check for one approved coordinate along a native drag path. */
+export interface BrowserDragPoint {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly targetFingerprint: string
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -232,6 +241,13 @@ export interface DesktopBrowserBridge {
   foreignPasteState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[],
     phase: 'arm' | 'check' | 'result' | 'cleanup', receipt: string): Promise<BrowserForeignPasteState>
+  /** Bounded native HTML drag in the caller's exact-URL guest. */
+  readonly nativeDragVersion?: 1
+  dragPoint?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    x: number, y: number, approvedOrigins: readonly string[]): Promise<BrowserDragPoint>
+  beginDrag?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
+  finishDrag?(lease: DesktopBrowserLeaseId, token: string,
+    point?: { readonly x: number; readonly y: number }): Promise<{ readonly dropped: boolean }>
   /** Fixed exact-option selection in one approved foreign frame. */
   readonly foreignFrameOptionVersion?: 1
   selectForeignOption?(lease: DesktopBrowserLeaseId, expectedUrl: string,

@@ -736,6 +736,19 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.foreignPasteState(event.sender, lease, expectedUrl, ref, approvedOrigins, phase, receipt)
   })
+  ipcMain.handle(DESKTOP_IPC.browserDragPoint, (event, lease: unknown, expectedUrl: unknown,
+    x: unknown, y: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.dragPoint(event.sender, lease, expectedUrl, x, y, approvedOrigins)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDragBegin, (event, lease: unknown, expectedUrl: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginDrag(event.sender, lease, expectedUrl)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserDragEnd, (event, lease: unknown, token: unknown, point: unknown) => {
+    assertProductSender(event)
+    return browserGuests.finishDrag(event.sender, lease, token, point)
+  })
   ipcMain.handle(DESKTOP_IPC.browserSelectForeignOption, (event, lease: unknown,
     expectedUrl: unknown, ref: unknown, approvedOrigins: unknown, options: unknown) => {
     assertProductSender(event)

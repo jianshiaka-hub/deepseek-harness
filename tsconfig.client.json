@@ -20,6 +20,7 @@
     "apps/desktop/src/keybindings.ts",
     "apps/desktop/src/browser-guests.ts",
     "apps/desktop/src/browser-clipboard.ts",
+    "apps/desktop/src/browser-drag.ts",
     "apps/desktop/src/browser-navigation-preflight.ts",
     "apps/desktop/src/browser-foreign-read.ts",
     "apps/desktop/src/browser-foreign-locate.ts",

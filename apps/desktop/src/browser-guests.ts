@@ -6,18 +6,19 @@ import type { DesktopBrowserInitialPreflight, DesktopBrowserOccurrence, DesktopB
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
+import { BrowserDragLease } from './browser-drag.ts'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
   stateForBrowserForeignKey, selectBrowserForeignText,
-  stateForBrowserForeignSecondary, stateForBrowserForeignPaste } from './browser-foreign-locate.ts'
+  stateForBrowserForeignSecondary, stateForBrowserForeignPaste, pointForBrowserDrag } from './browser-foreign-locate.ts'
 import type { BrowserLocateResult, BrowserForeignRefPoint,
   BrowserForeignInputState, BrowserForeignOptionResult,
   BrowserForeignKeyState,
   BrowserForeignSelectionResult,
-  BrowserForeignSecondaryState, BrowserForeignPasteState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignSecondaryState, BrowserForeignPasteState, BrowserDragPoint } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -37,7 +38,10 @@ export class DesktopBrowserGuests {
     readonly value: DesktopBrowserInitialPreflight }>()
   private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
   private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
+  private readonly dragLease = new BrowserDragLease()
   private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
+  private activeDrag: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId;
+    readonly token: string; readonly expectedUrl: string } | undefined
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
   constructor(private readonly hostUrl: () => string | undefined) {}
@@ -45,6 +49,12 @@ export class DesktopBrowserGuests {
   private clearExpiredPaste(): void {
     if (this.activePaste !== undefined && this.clipboardLease.activeToken !== this.activePaste.token) {
       this.activePaste = undefined
+    }
+  }
+
+  private clearExpiredDrag(): void {
+    if (this.activeDrag !== undefined && this.dragLease.activeToken !== this.activeDrag.token) {
+      this.activeDrag = undefined
     }
   }
 
@@ -100,6 +110,8 @@ export class DesktopBrowserGuests {
     if (lease.owner !== owner) throw new Error('desktop browser: guest belongs to another window')
     this.clearExpiredPaste()
     if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
+    this.clearExpiredDrag()
+    if (this.activeDrag?.lease === key) await this.finishDrag(owner, key, this.activeDrag.token)
     lease.releaseInput?.()
     this.leases.delete(key)
     const guest = lease.guest
@@ -159,6 +171,9 @@ export class DesktopBrowserGuests {
         guest.once('destroyed', () => {
           if (this.activePaste?.lease === id) {
             void this.finishPaste(owner, id, this.activePaste.token).catch(() => {})
+          }
+          if (this.activeDrag?.lease === id) {
+            void this.finishDrag(owner, id, this.activeDrag.token).catch(() => {})
           }
           lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id)
         })
@@ -536,6 +551,68 @@ export class DesktopBrowserGuests {
     try {
       const result = await stateForBrowserForeignPaste(guest, expectedUrl as string,
         ref, approvedOrigins as string[], phase, receipt)
+      if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
+        lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
+      return result
+    } finally {
+      guest.off('frame-created', markChanged)
+      guest.off('will-frame-navigate', markChanged)
+      guest.off('did-navigate-in-page', markChanged)
+    }
+  }
+
+  /** Begin one short native drag lease in the caller's exact-URL guest. */
+  async beginDrag(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
+    this.clearExpiredDrag()
+    if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_DRAG_UNAVAILABLE')
+    }
+    const key = id as DesktopBrowserLeaseId
+    const lease = this.leases.get(key)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl ||
+      this.activeDrag !== undefined) throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    const token = await this.dragLease.begin(guest, expectedUrl)
+    if (this.leases.get(key) !== lease || lease.guest !== guest || guest.isDestroyed() ||
+      guest.getURL() !== expectedUrl || owner.isDestroyed()) {
+      await this.dragLease.cancel(token)
+      throw new Error('SIDEBAR_NAVIGATED')
+    }
+    this.activeDrag = { owner, lease: key, token, expectedUrl }
+    return token
+  }
+
+  /** Deliver captured page drag data only to the same guest and checked point. */
+  async finishDrag(owner: WebContents, id: unknown, token: unknown,
+    point?: unknown): Promise<{ readonly dropped: boolean }> {
+    this.clearExpiredDrag()
+    const active = this.activeDrag
+    if (typeof id !== 'string' || typeof token !== 'string' || active === undefined ||
+      active.owner !== owner || active.lease !== id || active.token !== token) {
+      throw new Error('SIDEBAR_DRAG_LEASE_UNAVAILABLE')
+    }
+    try { return await this.dragLease.finish(token, active.expectedUrl, point) }
+    finally { if (this.activeDrag === active) this.activeDrag = undefined }
+  }
+
+  /** Revalidate a drag pixel through the approved native frame tree. */
+  async dragPoint(owner: WebContents, id: unknown, expectedUrl: unknown,
+    x: unknown, y: unknown, approvedOrigins: unknown): Promise<BrowserDragPoint> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 || approvedOrigins.length > 100 ||
+      approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    let changed = false
+    const markChanged = (): void => { changed = true }
+    guest.on('frame-created', markChanged)
+    guest.on('will-frame-navigate', markChanged)
+    guest.on('did-navigate-in-page', markChanged)
+    try {
+      const result = await pointForBrowserDrag(guest, expectedUrl as string, x, y,
+        approvedOrigins as string[])
       if (changed || this.leases.get(id as DesktopBrowserLeaseId) !== lease ||
         lease?.guest !== guest || owner.isDestroyed()) throw new Error('SIDEBAR_NAVIGATED')
       return result
