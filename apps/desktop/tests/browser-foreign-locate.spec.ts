@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
-  stateForBrowserForeignKey } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignKey, selectBrowserForeignText } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -149,4 +149,24 @@ it('preflights and checks a foreign key target without returning page contents',
   expect(code).not.toContain('return {value:')
   await expect(stateForBrowserForeignKey(h.guest, topUrl, ref, sites, 'Cmd+Enter', 'target'))
     .rejects.toThrow('SIDEBAR_KEY_TARGET_UNAVAILABLE')
+})
+
+it('selects one exact foreign text occurrence without exporting the page value', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ selected: true }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:paragraph:Text`
+  const selection = { text: 'unique', selectionType: 'text' } as const
+  await expect(selectBrowserForeignText(h.guest, topUrl, ref, [sites[0]!], selection))
+    .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+  await expect(selectBrowserForeignText(h.guest, topUrl, ref, sites, selection))
+    .resolves.toMatchObject({ url: topUrl, origin: sites[1], selected: true })
+  const code = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(code).toContain('SIDEBAR_AMBIGUOUS_SELECTION')
+  expect(code).toContain('selection.removeAllRanges()')
+  expect(code).toContain('return {selected:true}')
+  await expect(selectBrowserForeignText(h.guest, topUrl, ref, sites,
+    { text: 'unique', selectionType: 'all' })).rejects.toThrow('SIDEBAR_SELECTION_UNAVAILABLE')
 })

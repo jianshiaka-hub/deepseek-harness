@@ -160,6 +160,15 @@ export interface BrowserForeignKeyState {
   readonly targetUrls: readonly string[]
 }
 
+/** Confirmed selection in one approved foreign frame; excludes the selected text. */
+export interface BrowserForeignSelectionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly selected: true
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -210,6 +219,13 @@ export interface DesktopBrowserBridge {
   foreignKeyState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     ref: string, approvedOrigins: readonly string[], key: string,
     phase: 'target' | 'focus' | 'check'): Promise<BrowserForeignKeyState>
+  /** Select one exact, unique text occurrence in an approved foreign frame. */
+  readonly foreignFrameSelectionVersion?: 1
+  selectForeignText?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[], selection: {
+      readonly text: string; readonly prefix?: string; readonly suffix?: string;
+      readonly selectionType?: 'text' | 'cursor_before' | 'cursor_after'
+    }): Promise<BrowserForeignSelectionResult>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

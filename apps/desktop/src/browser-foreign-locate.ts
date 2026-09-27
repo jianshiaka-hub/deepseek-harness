@@ -2,7 +2,8 @@
 import type { WebContents } from 'electron'
 import type { BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint,
   BrowserForeignInputState, BrowserForeignOptionResult,
-  BrowserForeignKeyState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignKeyState,
+  BrowserForeignSelectionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from './browser-locator-script.ts'
 import { auditBrowserFrames } from './browser-foreign-read.ts'
 
@@ -427,4 +428,88 @@ export async function stateForBrowserForeignKey(guest: WebContents, expectedUrl:
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, targetUrls: raw.targetUrls }
+}
+
+/** Select only one exact occurrence in an approved foreign element, without exporting its text. */
+export async function selectBrowserForeignText(guest: WebContents, expectedUrl: string,
+  ref: unknown, approvedOrigins: readonly string[], input: unknown): Promise<BrowserForeignSelectionResult> {
+  if (!record(input) || Object.keys(input).some(key =>
+    !['text', 'prefix', 'suffix', 'selectionType'].includes(key)) ||
+    typeof input.text !== 'string' || input.text.length < 1 || input.text.length > 4000 ||
+    input.prefix !== undefined && (typeof input.prefix !== 'string' || input.prefix.length > 4000) ||
+    input.suffix !== undefined && (typeof input.suffix !== 'string' || input.suffix.length > 4000) ||
+    input.selectionType !== undefined &&
+      !['text', 'cursor_before', 'cursor_after'].includes(input.selectionType as string)) {
+    throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
+  }
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, ref, approvedOrigins)
+  const match = /^x(\d{1,10})-[a-f0-9]{64}\/(.+)$/iu.exec(ref as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === Number(match[1]))
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
+    const request = ${JSON.stringify(input)};
+    const field = ['INPUT','TEXTAREA'].includes(node.tagName);
+    if (frames.length !== 0 || !node.isConnected || node.matches('iframe,frame') ||
+      field && (node.disabled || node.readOnly ||
+        node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type))) {
+      throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+    }
+    const doc = node.ownerDocument;
+    const source = field ? node.value : node.textContent ?? '';
+    if (source.length > 200000) throw new Error('SIDEBAR_SELECTION_TOO_LARGE');
+    const matches = [];
+    for (let index = source.indexOf(request.text); index >= 0;
+      index = source.indexOf(request.text,index + 1)) {
+      if (request.prefix !== undefined && !source.slice(0,index).endsWith(request.prefix)) continue;
+      if (request.suffix !== undefined &&
+        !source.slice(index + request.text.length).startsWith(request.suffix)) continue;
+      matches.push(index);
+      if (matches.length > 1) throw new Error('SIDEBAR_AMBIGUOUS_SELECTION');
+    }
+    if (matches.length !== 1) throw new Error('SIDEBAR_TEXT_NOT_FOUND');
+    let start = matches[0], end = start + request.text.length;
+    if (request.selectionType === 'cursor_before') end = start;
+    if (request.selectionType === 'cursor_after') start = end;
+    if (field) {
+      node.focus();
+      if (sidebarActiveElement(doc) !== node) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      node.setSelectionRange(start,end);
+      if (node.selectionStart !== start || node.selectionEnd !== end) {
+        throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      }
+    } else {
+      const walker = doc.createTreeWalker(node,doc.defaultView.NodeFilter.SHOW_TEXT);
+      const nodes = []; let offset = 0;
+      while (walker.nextNode()) {
+        const item = walker.currentNode;
+        nodes.push({item,start:offset,end:offset + item.textContent.length});
+        offset += item.textContent.length;
+      }
+      const first = nodes.find(item => start >= item.start && start <= item.end);
+      const last = nodes.find(item => end >= item.start && end <= item.end);
+      if (!first || !last) throw new Error('SIDEBAR_TEXT_NOT_FOUND');
+      const range = doc.createRange();
+      range.setStart(first.item,start - first.start);
+      range.setEnd(last.item,end - last.start);
+      const selection = doc.getSelection();
+      if (!selection) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+      selection.removeAllRanges(); selection.addRange(range);
+      if (selection.rangeCount !== 1 || selection.toString() !==
+        (request.selectionType === 'cursor_before' || request.selectionType === 'cursor_after'
+          ? '' : request.text)) throw new Error('SIDEBAR_SELECTION_UNAVAILABLE');
+    }
+    return {selected:true};
+  })()`)
+  if (!record(raw) || raw.selected !== true ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_SELECTION_UNAVAILABLE')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint, selected: true }
 }
