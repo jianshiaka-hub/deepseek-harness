@@ -121,6 +121,18 @@ export interface BrowserLocateResult {
   }[]
 }
 
+/** Checked CSS-pixel target for a single approved foreign-frame element. */
+export interface BrowserForeignRefPoint {
+  readonly url: string
+  readonly title: string
+  readonly x: number
+  readonly y: number
+  readonly fingerprint: string
+  readonly origin: string
+  /** Known link or form destination; null when no static target is exposed. */
+  readonly targetUrl: string | null
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -149,6 +161,10 @@ export interface DesktopBrowserBridge {
   readonly foreignFrameLocateVersion?: 1
   locateForeign?(lease: DesktopBrowserLeaseId, expectedUrl: string,
     query: BrowserLocateQuery, approvedOrigins: readonly string[]): Promise<BrowserLocateResult | null>
+  /** Revalidate one approved foreign ref and map it to the selected guest viewport. */
+  readonly foreignFramePointVersion?: 1
+  foreignRefPoint?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[]): Promise<BrowserForeignRefPoint>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
-import { locateBrowserForeignFrame } from '../src/browser-foreign-locate.ts'
+import { locateBrowserForeignFrame, pointForBrowserForeignRef } from '../src/browser-foreign-locate.ts'
+import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
 const childUrl = 'https://embedded.test/widget'
@@ -55,4 +56,28 @@ it('refuses an ambiguous or navigated frame before returning an element', async 
   })
   await expect(locateBrowserForeignFrame(n.guest, topUrl, query, sites))
     .rejects.toThrow('SIDEBAR_NAVIGATED')
+})
+
+it('maps a fresh foreign ref into the guest viewport and carries its checked link target', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:button:Open`
+  await expect(pointForBrowserForeignRef(h.guest, topUrl, ref, [sites[0]!]))
+    .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+  Object.assign(h.child, { executeJavaScript: vi.fn(async (_code: string) => ({ x: 10, y: 5,
+    targetUrl: 'https://target.test/go' })) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async (_code: string) => ({ x: 31, y: 42 })) })
+  await expect(pointForBrowserForeignRef(h.guest, topUrl, ref, sites))
+    .resolves.toMatchObject({ url: topUrl, x: 31, y: 42,
+      origin: sites[1], targetUrl: 'https://target.test/go' })
+  await expect(pointForBrowserForeignRef(h.guest, topUrl,
+    `x2-${'0'.repeat(64)}/d4-1234abcd:button:Open`, sites))
+    .rejects.toThrow('SIDEBAR_STALE_REF')
+  const unsafe = fixture()
+  Object.assign(unsafe.child, { parent: unsafe.top, executeJavaScript: vi.fn(async () => ({
+    x: 10, y: 5, targetUrl: 'javascript:alert(1)',
+  })) })
+  const unsafeRef = `x2-${auditBrowserFrames(unsafe.guest, topUrl, sites).fingerprint}/d4-1234abcd:button:Open`
+  await expect(pointForBrowserForeignRef(unsafe.guest, topUrl, unsafeRef, sites))
+    .rejects.toThrow('SIDEBAR_POINT_UNAVAILABLE')
 })
