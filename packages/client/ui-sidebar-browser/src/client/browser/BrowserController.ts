@@ -22,7 +22,7 @@ export interface BrowserControllerOptions {
   readonly tabId: TabId
   readonly sessionId?: string
   readonly agentInitialClientId?: string
-  readonly initialUrl?: string
+  readonly initialUrl?: string | undefined
   readonly signal: AbortSignal
   readonly applicationOrigin: string
   readonly initial: BrowserTabState | undefined

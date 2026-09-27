@@ -20,16 +20,18 @@ const clientId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const initialUrl = 'https://approved.test/start'
 
 it('holds the first foreign redirect of a reserved blank occurrence before network delivery', () => {
-  const owner = Object.assign(new EventEmitter(), { id: 17, isDestroyed: () => false, send: vi.fn() })
-  const window = { webContents: owner } as unknown as BrowserWindow
+  const owner = Object.assign(new EventEmitter(), { id: 17, isDestroyed: () => false,
+    send: vi.fn() })
+  const contents = owner as Pick<WebContents, 'id' | 'isDestroyed' | 'send'> as WebContents
+  const window = { webContents: contents } as BrowserWindow
   const guests = new DesktopBrowserGuests(() => undefined)
   guests.bind(window, () => () => {})
-  guests.reserveBlankNavigationPreflight(owner as unknown as WebContents, clientId,
+  guests.reserveBlankNavigationPreflight(contents, clientId,
     'session-a', 'tab-a', initialUrl)
-  expect(() => { guests.acquire(owner as unknown as WebContents, 'workspace-a', {
+  expect(() => { guests.acquire(contents, 'workspace-a', {
     sessionId: 'session-a', tabId: 'tab-a', initialUrl: 'https://different.test/' }) })
     .toThrow('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
-  const reservation = guests.acquire(owner as unknown as WebContents, 'workspace-a', {
+  const reservation = guests.acquire(contents, 'workspace-a', {
     sessionId: 'session-a', tabId: 'tab-a', initialUrl })
   const guest = Object.assign(new EventEmitter(), { id: 42,
     getURL: () => `about:blank#${reservation.lease}`, isDestroyed: () => false,
@@ -47,18 +49,20 @@ it('holds the first foreign redirect of a reserved blank occurrence before netwo
   expect(intent).toMatchObject({ clientId, sessionId: 'session-a', tabId: 'tab-a',
     expectedUrl: 'about:blank', popupInitialUrl: initialUrl,
     targetUrl: 'https://foreign.test/private' })
-  guests.resolveNavigationPreflight(owner as unknown as WebContents, intent.token, false)
+  guests.resolveNavigationPreflight(contents, intent.token, false)
   expect(callback).toHaveBeenCalledExactlyOnceWith({ cancel: true })
   guest.emit('destroyed')
 })
 
 it('cancels an unused blank reservation without arming a later guest', () => {
-  const owner = Object.assign(new EventEmitter(), { id: 18, isDestroyed: () => false, send: vi.fn() })
+  const owner = Object.assign(new EventEmitter(), { id: 18, isDestroyed: () => false,
+    send: vi.fn() })
+  const contents = owner as Pick<WebContents, 'id' | 'isDestroyed' | 'send'> as WebContents
   const guests = new DesktopBrowserGuests(() => undefined)
-  guests.reserveBlankNavigationPreflight(owner as unknown as WebContents, clientId,
+  guests.reserveBlankNavigationPreflight(contents, clientId,
     'session-a', 'tab-a', initialUrl)
-  guests.cancelBlankNavigationPreflight(owner as unknown as WebContents, clientId,
+  guests.cancelBlankNavigationPreflight(contents, clientId,
     'session-a', 'tab-a', initialUrl)
-  expect(() => { guests.reserveBlankNavigationPreflight(owner as unknown as WebContents,
+  expect(() => { guests.reserveBlankNavigationPreflight(contents,
     clientId, 'session-a', 'tab-a', initialUrl) }).not.toThrow()
 })

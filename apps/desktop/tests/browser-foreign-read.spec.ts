@@ -7,14 +7,15 @@ const topUrl = 'https://example.test/page'
 const sites = ['https://example.test', 'https://embedded.test']
 
 function fixture() {
-  const top = { detached: false, frameTreeNodeId: 1, origin: sites[0], url: topUrl,
-    framesInSubtree: [] as unknown[] }
-  const foreign = { detached: false, frameTreeNodeId: 2, origin: sites[1],
+  const top = { detached: false, frameTreeNodeId: 1, origin: sites[0]!, url: topUrl,
+    framesInSubtree: [] as Array<{ detached: boolean; frameTreeNodeId: number;
+      origin: string; url: string; executeJavaScript?: (code: string) => Promise<object> }> }
+  const foreign = { detached: false, frameTreeNodeId: 2, origin: sites[1]!,
     url: 'https://embedded.test/widget', executeJavaScript: vi.fn(async () =>
       ({ text: 'Foreign visible text', roles: '- button "Open"' })) }
   top.framesInSubtree.push(top, foreign)
   const guest = { mainFrame: top, isDestroyed: () => false, isLoadingMainFrame: () => false,
-    getURL: () => topUrl } as unknown as WebContents
+    getURL: () => topUrl } as WebContents
   return { top, foreign, guest }
 }
 

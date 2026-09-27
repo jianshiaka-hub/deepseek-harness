@@ -64,7 +64,9 @@ export function BrowserBody(props: BrowserBodyProps): ReactNode {
     const hide = mount({
       tabId: tab.id, signal: tab.signal, viewportId, applicationOrigin: window.location.origin,
       initial: initial.current, initialUrl: initialUrl.current,
-      sessionId: props.sessionId, agentInitialClientId: agentInitialClientId.current,
+      sessionId: props.sessionId,
+      ...(agentInitialClientId.current === undefined ? {} :
+        { agentInitialClientId: agentInitialClientId.current }),
       openTab: (url) => { tab.actions.openTab('browser', { params: { url }, revealIfOpened: false }) },
     })
     setMountEpoch(value => value + 1)
