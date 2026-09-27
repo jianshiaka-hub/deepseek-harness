@@ -722,6 +722,12 @@ async function main(): Promise<void> {
     return browserGuests.foreignInputState(event.sender, lease, expectedUrl, ref,
       approvedOrigins, phase, value)
   })
+  ipcMain.handle(DESKTOP_IPC.browserSelectForeignOption, (event, lease: unknown,
+    expectedUrl: unknown, ref: unknown, approvedOrigins: unknown, options: unknown) => {
+    assertProductSender(event)
+    return browserGuests.selectForeignOption(event.sender, lease, expectedUrl, ref,
+      approvedOrigins, options)
+  })
   ipcMain.handle(DESKTOP_IPC.browserCaptureFrameAware, (event, lease: unknown,
     expectedUrl: unknown, clip: unknown, fullPage: unknown, approvedOrigins: unknown) => {
     assertProductSender(event)

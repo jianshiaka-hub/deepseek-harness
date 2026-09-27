@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
-  stateForBrowserForeignInput } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignInput, selectBrowserForeignOption } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -114,4 +114,18 @@ it('checks a foreign typing target without accepting password inputs', async () 
   expect(code).toContain("['text','search','email','url','tel','number']")
   expect(code).toContain('node.focus()')
   expect(code).toContain('sidebarActiveElement(document)')
+})
+
+it('selects only a bounded exact option in an approved foreign frame', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ selected: ['blue'] }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:combobox:Color`
+  await expect(selectBrowserForeignOption(h.guest, topUrl, ref, sites, [{ value: 'blue' }]))
+    .resolves.toMatchObject({ url: topUrl, origin: sites[1], selected: ['blue'] })
+  expect(h.child.executeJavaScript.mock.calls[1]?.[0]).toContain("node.tagName !== 'SELECT'")
+  await expect(selectBrowserForeignOption(h.guest, topUrl, ref, sites, [{ value: 'blue', extra: true }]))
+    .rejects.toThrow('SIDEBAR_OPTION_UNAVAILABLE')
 })

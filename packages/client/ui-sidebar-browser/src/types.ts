@@ -142,6 +142,15 @@ export interface BrowserForeignInputState {
   readonly hadText: boolean
 }
 
+/** Confirmed values of one approved foreign select, bounded for the plugin. */
+export interface BrowserForeignOptionResult {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly selected: readonly string[]
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -181,6 +190,12 @@ export interface DesktopBrowserBridge {
     value?: string): Promise<BrowserForeignInputState>
   /** Extends foreignInputState with focus/check phases for append typing. */
   readonly foreignFrameTypeVersion?: 1
+  /** Fixed exact-option selection in one approved foreign frame. */
+  readonly foreignFrameOptionVersion?: 1
+  selectForeignOption?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[], options: readonly {
+      readonly value?: string; readonly label?: string; readonly index?: number
+    }[]): Promise<BrowserForeignOptionResult>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

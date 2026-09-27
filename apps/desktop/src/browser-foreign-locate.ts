@@ -1,7 +1,7 @@
 /** Fixed bounded locator for one explicitly selected, site-approved cross-origin frame. */
 import type { WebContents } from 'electron'
 import type { BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint,
-  BrowserForeignInputState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignInputState, BrowserForeignOptionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from './browser-locator-script.ts'
 import { auditBrowserFrames } from './browser-foreign-read.ts'
 
@@ -281,4 +281,69 @@ export async function stateForBrowserForeignInput(guest: WebContents, expectedUr
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, hadText: raw.hadText }
+}
+
+/** Change one approved foreign select through bounded exact option matchers. */
+export async function selectBrowserForeignOption(guest: WebContents, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], selectors: unknown): Promise<BrowserForeignOptionResult> {
+  if (!Array.isArray(selectors) || selectors.length < 1 || selectors.length > 20 ||
+    selectors.some((spec: unknown) => !record(spec) ||
+      Object.keys(spec).length < 1 || Object.keys(spec).some(key => !['value', 'label', 'index'].includes(key)) ||
+      Object.values(spec).every(value => value === undefined) ||
+      spec.value !== undefined && (typeof spec.value !== 'string' || spec.value.length > 120) ||
+      spec.label !== undefined && (typeof spec.label !== 'string' || spec.label.length > 120) ||
+      spec.index !== undefined && (!Number.isSafeInteger(spec.index) ||
+        typeof spec.index !== 'number' || spec.index < 0 || spec.index > 999))) {
+    throw new Error('SIDEBAR_OPTION_UNAVAILABLE')
+  }
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x(\d{1,10})-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === Number(match[1]))
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
+    const selectors = ${JSON.stringify(selectors)};
+    if (frames.length !== 0 || !node.isConnected || node.tagName !== 'SELECT' ||
+      node.disabled || node.options.length > 1000 ||
+      (!node.multiple && selectors.length !== 1)) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+    const options = [...node.options];
+    const targets = selectors.map(spec => {
+      const matches = options.filter((option,index) =>
+        (spec.value === undefined || option.value === spec.value) &&
+        (spec.label === undefined || option.label === spec.label) &&
+        (spec.index === undefined || index === spec.index) &&
+        !option.disabled && !(option.parentElement?.tagName === 'OPTGROUP' && option.parentElement.disabled));
+      if (matches.length !== 1) throw new Error('SIDEBAR_OPTION_NOT_UNIQUE');
+      return matches[0];
+    });
+    if (new Set(targets).size !== targets.length) throw new Error('SIDEBAR_OPTION_NOT_UNIQUE');
+    const indices = targets.map(option => options.indexOf(option)).sort((a,b) => a-b);
+    node.focus();
+    if (sidebarActiveElement(document) !== node) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+    if (node.multiple) {
+      const selected = new Set(targets);
+      for (const option of options) option.selected = selected.has(option);
+    } else node.selectedIndex = indices[0];
+    node.dispatchEvent(new Event('input',{bubbles:true}));
+    node.dispatchEvent(new Event('change',{bubbles:true}));
+    const after = options.flatMap((option,index) => option.selected ? [index] : []);
+    if (!node.isConnected || after.length !== indices.length ||
+      after.some((index,position) => index !== indices[position]) ||
+      location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED');
+    const selected = after.map(index => options[index].value);
+    if (selected.some(value => value.length > 120)) throw new Error('SIDEBAR_OPTION_UNAVAILABLE');
+    return {selected};
+  })()`)
+  if (!record(raw) || !Array.isArray(raw.selected) || raw.selected.length > 20 ||
+    raw.selected.some(value => typeof value !== 'string' || value.length > 120) ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_OPTION_NOT_CONFIRMED')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint, selected: raw.selected }
 }
