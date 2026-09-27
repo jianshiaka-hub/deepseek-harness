@@ -20,6 +20,9 @@ export interface BrowserControllerState {
 /** Construction inputs for one tab occurrence. */
 export interface BrowserControllerOptions {
   readonly tabId: TabId
+  readonly sessionId?: string
+  readonly agentInitialClientId?: string
+  readonly initialUrl?: string
   readonly signal: AbortSignal
   readonly applicationOrigin: string
   readonly initial: BrowserTabState | undefined
@@ -46,6 +49,10 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     this.checkpoint = options.initial
     this.page = options.createPage({
       initial: options.initial,
+      ...(options.sessionId === undefined || options.agentInitialClientId === undefined ||
+        options.initialUrl === undefined ? {} : { initialPreflight: {
+          clientId: options.agentInitialClientId, sessionId: options.sessionId,
+          tabId: options.tabId, initialUrl: options.initialUrl } }),
       persist: (state) => {
         if (this.disposed) return
         this.checkpoint = state
@@ -171,6 +178,8 @@ export class BrowserController implements HostObservable<BrowserControllerState>
 /** Values available once a Sidebar body has committed its content container. */
 export interface BrowserMountRequest {
   readonly tabId: TabId
+  readonly sessionId?: string
+  readonly agentInitialClientId?: string
   readonly signal: AbortSignal
   readonly viewportId: string
   readonly applicationOrigin: string

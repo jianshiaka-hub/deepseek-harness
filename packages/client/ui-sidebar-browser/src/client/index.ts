@@ -32,7 +32,7 @@ export type { BrowserAddressFailure, BrowserAddressResult, BrowserTarget } from 
 declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
   interface SidebarRightTabParamsMap {
     /** Optional initial Browser URL. */
-    browser: { readonly url?: string }
+    browser: { readonly url?: string; readonly agentInitialClientId?: string }
   }
 }
 

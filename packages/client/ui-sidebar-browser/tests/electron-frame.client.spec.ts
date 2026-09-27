@@ -4,6 +4,46 @@ import { ElectronWebViewImpl } from '../src/client/electron/ElectronWebViewImpl.
 import { ElectronWebviewPresentation, type WebviewElement } from '../src/client/electron/ElectronWebviewPresentation.ts'
 import type { DesktopBrowserBridge, DesktopBrowserLeaseId } from '../src/types.ts'
 
+it('passes an agent-created tab bootstrap claim before creating its first webview guest', async () => {
+  const initialUrl = 'https://approved.test/start'
+  const initialPreflight = { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    sessionId: 'session-a', tabId: 'tab-a', initialUrl }
+  const bridge: DesktopBrowserBridge = {
+    acquire: vi.fn(async () => ({ lease: 'lease' as DesktopBrowserLeaseId, partition: 'partition' })),
+    release: vi.fn(async () => {}), onOpenRequested: () => () => {},
+  }
+  const presentation = new ElectronWebviewPresentation({ mounted: () => { frame.attach() },
+    unmounted: () => { frame.detach() } })
+  const frame = new ElectronWebViewImpl({ initial: undefined, initialPreflight,
+    persist: vi.fn(), openRequested: vi.fn() }, bridge, async () => 'cwd:/workspace', presentation)
+  const host = document.createElement('div')
+  host.id = 'electron-initial-preflight'
+  document.body.append(host)
+  let hide: (() => void) | undefined
+  try {
+    hide = presentation.mount(host.id)
+    frame.loadUrl({ kind: 'https', url: initialUrl, title: 'Approved' })
+    await vi.waitFor(() => { expect(bridge.acquire).toHaveBeenCalledWith('cwd:/workspace', initialPreflight) })
+    await vi.waitFor(() => { expect(host.firstElementChild).not.toBeNull() })
+    const element = host.firstElementChild as WebviewElement
+    let url = 'about:blank'
+    Object.assign(element, { loadURL: vi.fn(async () => {}), getURL: () => url,
+      getTitle: () => 'Approved', isLoading: () => false, canGoBack: () => false,
+      canGoForward: () => false, clearHistory: vi.fn() })
+    element.dispatchEvent(new Event('dom-ready'))
+    url = initialUrl
+    element.dispatchEvent(new Event('did-navigate'))
+    hide()
+    hide = presentation.mount(host.id)
+    await vi.waitFor(() => { expect(bridge.acquire).toHaveBeenCalledTimes(2) })
+    expect(bridge.acquire).toHaveBeenLastCalledWith('cwd:/workspace', undefined)
+  } finally {
+    hide?.()
+    await frame.dispose()
+    host.remove()
+  }
+})
+
 it('clears a failed load when the main page retries without a toolbar command', async () => {
   let url = 'about:blank'
   let loading = true

@@ -1,7 +1,8 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
 import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
-import type { DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { DesktopBrowserInitialPreflight, DesktopBrowserLeaseId, DesktopBrowserOpenRequest,
+  DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 
@@ -11,6 +12,7 @@ interface GuestLease {
   attached: boolean
   guest?: WebContents
   releaseInput?: () => void
+  readonly initialPreflight?: DesktopBrowserInitialPreflight
 }
 
 /** Owns workspace storage partitions independently from individual tab guests. */
@@ -28,9 +30,12 @@ export class DesktopBrowserGuests {
    * @param workspace - workspace identity received over IPC.
    * @returns opaque lease and the partition approved for it.
    */
-  acquire(owner: WebContents, workspace: unknown): DesktopBrowserReservation {
+  acquire(owner: WebContents, workspace: unknown, initialPreflight?: unknown): DesktopBrowserReservation {
     if (typeof workspace !== 'string' || workspace.length === 0 || workspace.length > 4096) {
       throw new Error('desktop browser: a workspace storage identity is required')
+    }
+    if (initialPreflight !== undefined && !this.validInitialPreflight(initialPreflight)) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
     }
     let partition = this.partitions.get(workspace)
     if (partition === undefined) {
@@ -39,7 +44,8 @@ export class DesktopBrowserGuests {
       this.partitions.set(workspace, partition)
     }
     const lease = randomUUID() as DesktopBrowserLeaseId
-    this.leases.set(lease, { owner, partition, attached: false })
+    this.leases.set(lease, { owner, partition, attached: false,
+      ...(initialPreflight === undefined ? {} : { initialPreflight }) })
     return { lease, partition }
   }
 
@@ -110,6 +116,16 @@ export class DesktopBrowserGuests {
         attachedLease = id
         lease.releaseInput = attachInput(guest, id)
         guest.once('destroyed', () => { lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id) })
+        if (lease.initialPreflight !== undefined) {
+          const claim = lease.initialPreflight
+          try {
+            this.navigationPreflight.arm(owner, guest, id, claim.clientId,
+              claim.sessionId, claim.tabId, 0, 'about:blank', claim.initialUrl)
+          } catch {
+            guest.close({ waitForBeforeUnload: false })
+            return
+          }
+        }
       })
       guest.setWindowOpenHandler(({ url, postBody }) => {
         const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease)
@@ -199,6 +215,17 @@ export class DesktopBrowserGuests {
     const url = new URL(value)
     return ['http:', 'https:'].includes(url.protocol) && url.username === '' && url.password === ''
       && !this.isApplicationHost(url)
+  }
+
+  private validInitialPreflight(value: unknown): value is DesktopBrowserInitialPreflight {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+    const row = value as Record<string, unknown>
+    return Object.keys(row).length === 4 &&
+      ['clientId', 'sessionId', 'tabId', 'initialUrl'].every(key => typeof row[key] === 'string') &&
+      /^[a-f0-9-]{36}$/iu.test(row.clientId as string) &&
+      (row.sessionId as string).length > 0 && (row.sessionId as string).length <= 256 &&
+      (row.tabId as string).length > 0 && (row.tabId as string).length <= 256 &&
+      (row.initialUrl as string).length <= 16_384 && this.allowedNavigation(row.initialUrl as string)
   }
 
   private isApplicationHost(url: URL): boolean {

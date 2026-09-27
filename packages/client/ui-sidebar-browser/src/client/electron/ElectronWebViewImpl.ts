@@ -26,6 +26,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
   private pending: BrowserTarget | undefined
   private revision = 0
   private firstDocument = true
+  private initialPreflightConsumed = false
   private checkpoint: BrowserTarget | undefined
   private disposal: Promise<void> | undefined
   private attachment: AbortController | undefined
@@ -144,7 +145,11 @@ export class ElectronWebViewImpl implements BrowserFrame {
   private async createGuest(attachmentSignal: AbortSignal): Promise<void> {
     this.workspaceKey ??= await this.workspace(attachmentSignal)
     if (attachmentSignal.aborted) return
-    const reservation = await this.bridge.acquire(this.workspaceKey)
+    const initialPreflight = this.initialPreflightConsumed ? undefined : this.options.initialPreflight
+    if (initialPreflight !== undefined && this.pending?.url !== initialPreflight.initialUrl) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    }
+    const reservation = await this.bridge.acquire(this.workspaceKey, initialPreflight)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- The signal can abort while acquire is pending.
     if (attachmentSignal.aborted) { await this.release(reservation.lease); return }
     this.lease = reservation.lease
@@ -213,6 +218,7 @@ export class ElectronWebViewImpl implements BrowserFrame {
       // The lease-bearing bootstrap document is not a user history entry.
       element.clearHistory()
       this.firstDocument = false
+      this.initialPreflightConsumed = true
     }
     let target = current.target
     let address = current.address
