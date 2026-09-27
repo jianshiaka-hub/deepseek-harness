@@ -8,6 +8,7 @@ function navigationIntent(value: unknown): value is DesktopBrowserNavigationInte
   const row = value as Record<string, unknown>
   return ['token', 'lease', 'clientId', 'sessionId', 'tabId', 'expectedUrl', 'targetUrl', 'method']
     .every(key => typeof row[key] === 'string') && Number.isSafeInteger(row.navigationEpoch) &&
+    (row.resourceType === undefined || row.resourceType === 'subFrame') &&
     (row.popupInitialUrl === undefined || typeof row.popupInitialUrl === 'string')
 }
 

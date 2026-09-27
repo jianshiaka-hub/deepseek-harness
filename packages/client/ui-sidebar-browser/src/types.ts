@@ -27,6 +27,7 @@ export interface DesktopBrowserNavigationIntent {
   readonly expectedUrl: string
   readonly targetUrl: string
   readonly method: string
+  readonly resourceType?: 'subFrame'
   readonly popupInitialUrl?: string
 }
 

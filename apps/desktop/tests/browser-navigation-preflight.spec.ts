@@ -30,13 +30,27 @@ describe('agent navigation preflight', () => {
     h.gate.dispose()
   })
 
-  it('ignores subresources and same-origin requests, but cancels on tab removal', () => {
+  it('ignores ordinary subresources and same-origin requests, but cancels on tab removal', () => {
     const h = fixture()
     const callback = vi.fn()
-    expect(h.gate.intercept(42, 'subFrame', 'https://target.test/frame', 'GET', callback)).toBe(false)
+    expect(h.gate.intercept(42, 'image', 'https://target.test/logo.png', 'GET', callback)).toBe(false)
     expect(h.gate.intercept(42, 'mainFrame', 'https://source.test/next', 'GET', callback)).toBe(false)
     expect(h.gate.intercept(42, 'mainFrame', 'https://target.test/next', 'GET', callback)).toBe(true)
     h.gate.revokeGuest(h.guest)
+    expect(callback).toHaveBeenCalledExactlyOnceWith({ cancel: true })
+    h.gate.dispose()
+  })
+
+  it('holds a foreign iframe document before delivery while leaving ordinary subresources alone', () => {
+    const h = fixture()
+    const callback = vi.fn()
+    expect(h.gate.intercept(42, 'image', 'https://target.test/logo.png', 'GET', callback)).toBe(false)
+    expect(h.gate.intercept(42, 'subFrame', 'https://source.test/inside', 'GET', callback)).toBe(false)
+    expect(h.gate.intercept(42, 'subFrame', 'https://target.test/frame', 'GET', callback)).toBe(true)
+    expect(callback).not.toHaveBeenCalled()
+    expect(h.sent[0]).toMatchObject({ resourceType: 'subFrame',
+      expectedUrl: source, targetUrl: 'https://target.test/frame', method: 'GET' })
+    h.gate.resolve(h.sent[0]!.token, h.owner, false)
     expect(callback).toHaveBeenCalledExactlyOnceWith({ cancel: true })
     h.gate.dispose()
   })

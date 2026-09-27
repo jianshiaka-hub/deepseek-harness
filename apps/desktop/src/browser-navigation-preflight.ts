@@ -10,6 +10,7 @@ export interface BrowserNavigationIntent {
   readonly expectedUrl: string
   readonly targetUrl: string
   readonly method: string
+  readonly resourceType?: 'subFrame'
   readonly popupInitialUrl?: string
 }
 
@@ -44,7 +45,7 @@ interface Pending {
   readonly timer: ReturnType<typeof setTimeout>
 }
 
-/** Hold only agent-triggered cross-origin main-frame requests before network delivery. */
+/** Hold cross-origin documents in an agent-touched guest before network delivery. */
 export class BrowserNavigationPreflight {
   private readonly guards = new Map<number, Guard>()
   private readonly pending = new Map<string, Pending>()
@@ -70,7 +71,7 @@ export class BrowserNavigationPreflight {
   /** @returns true only when this class owns the WebRequest callback. */
   intercept(webContentsId: number | undefined, resourceType: string, targetUrl: string,
     method: string, callback: (response: { readonly cancel: boolean }) => void): boolean {
-    if (resourceType !== 'mainFrame' || webContentsId === undefined) return false
+    if (!['mainFrame', 'subFrame'].includes(resourceType) || webContentsId === undefined) return false
     let guard = this.guards.get(webContentsId)
     if (guard === undefined) return false
     const currentUrl = guard.guest.getURL()
@@ -103,6 +104,7 @@ export class BrowserNavigationPreflight {
       guard.owner.send(this.channel, { token, lease: guard.lease, clientId: guard.clientId,
         sessionId: guard.sessionId, tabId: guard.tabId, navigationEpoch: guard.navigationEpoch,
         expectedUrl: guard.expectedUrl, targetUrl, method,
+        ...(resourceType === 'subFrame' ? { resourceType: 'subFrame' as const } : {}),
         ...(guard.popupInitialUrl === undefined ? {} : { popupInitialUrl: guard.popupInitialUrl }) })
     } catch {
       this.resolve(token, guard.owner, false)
