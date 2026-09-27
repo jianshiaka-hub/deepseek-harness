@@ -5,8 +5,9 @@ import type { DesktopBrowserInitialPreflight, DesktopBrowserOccurrence, DesktopB
   DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
-import { auditBrowserFrames, readBrowserForeignText,
-  type BrowserFrameAudit, type BrowserForeignText } from './browser-foreign-read.ts'
+import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
+  captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
+  type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -254,6 +255,23 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     return readBrowserForeignText(guest, expectedUrl as string, approvedOrigins as string[])
+  }
+
+  /** Capture only approved pixels of the named guest, never another tab or window. */
+  captureFrameAware(owner: WebContents, id: unknown, expectedUrl: unknown, clip: unknown,
+    fullPage: unknown, approvedOrigins: unknown): Promise<BrowserFrameScreenshot> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (typeof fullPage !== 'boolean' || clip !== undefined && (typeof clip !== 'object' ||
+      clip === null || Array.isArray(clip) || Object.keys(clip).length !== 4 ||
+      !['x', 'y', 'width', 'height'].every(key => key in clip)) ||
+      !Array.isArray(approvedOrigins) || approvedOrigins.length < 1 ||
+      approvedOrigins.length > 100 || approvedOrigins.some(origin => typeof origin !== 'string')) {
+      throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+    }
+    const siteList = approvedOrigins as string[]
+    return fullPage
+      ? captureBrowserFullPage(guest, expectedUrl as string, clip as BrowserScreenshotClip | undefined, siteList)
+      : captureBrowserViewport(guest, expectedUrl as string, clip as BrowserScreenshotClip | undefined, siteList)
   }
 
   private readableGuest(owner: WebContents, id: unknown, expectedUrl: unknown): WebContents {

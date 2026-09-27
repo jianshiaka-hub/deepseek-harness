@@ -705,6 +705,12 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.inspectForeignText(event.sender, lease, expectedUrl, approvedOrigins)
   })
+  ipcMain.handle(DESKTOP_IPC.browserCaptureFrameAware, (event, lease: unknown,
+    expectedUrl: unknown, clip: unknown, fullPage: unknown, approvedOrigins: unknown) => {
+    assertProductSender(event)
+    return browserGuests.captureFrameAware(event.sender, lease, expectedUrl, clip,
+      fullPage, approvedOrigins)
+  })
   ipcMain.handle(DESKTOP_IPC.browserNavigationPreflightResolve, (event, token: unknown, allowed: unknown) => {
     assertProductSender(event)
     browserGuests.resolveNavigationPreflight(event.sender, token, allowed)

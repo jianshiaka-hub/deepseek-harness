@@ -70,6 +70,14 @@ export interface DesktopBrowserBridge {
     approvedOrigins: readonly string[]): Promise<{ readonly fingerprint: string;
       readonly frames: readonly { readonly origin: string; readonly text: string;
         readonly roles: string }[] }>
+  /** Native guest capture after all current frame origins have received exact-site grants. */
+  readonly foreignFrameCaptureVersion?: 1
+  captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    clip: { readonly x: number; readonly y: number; readonly width: number;
+      readonly height: number } | undefined, fullPage: boolean,
+    approvedOrigins: readonly string[]): Promise<{ readonly url: string; readonly title: string;
+      readonly base64: string; readonly viewport: { readonly width: number;
+        readonly height: number } }>
   armNavigationPreflight?(lease: DesktopBrowserLeaseId, clientId: string, sessionId: string,
     tabId: string, navigationEpoch: number, expectedUrl: string): Promise<void>
   resolveNavigationPreflight?(token: string, allowed: boolean): Promise<void>

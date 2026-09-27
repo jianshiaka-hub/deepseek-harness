@@ -12,6 +12,25 @@ export interface BrowserForeignText {
   readonly frames: readonly { readonly origin: string; readonly text: string; readonly roles: string }[]
 }
 
+export interface BrowserScreenshotClip {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+export interface BrowserFrameScreenshot {
+  readonly url: string
+  readonly title: string
+  readonly base64: string
+  readonly viewport: { readonly width: number; readonly height: number }
+}
+
+const MAX_DIMENSION = 8192
+const MAX_PIXELS = 16_777_216
+const MAX_IMAGE_BYTES = 4_194_304
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+
 const FOREIGN_FRAME_SNAPSHOT = String.raw`(() => {
   const text = String(document.body?.innerText ?? '').slice(0,1000).replaceAll('[ref=','[ref =');
   const selector = 'a,button,input,textarea,select,img[alt],area[alt],[role],[contenteditable],h1,h2,h3';
@@ -119,4 +138,116 @@ export async function readBrowserForeignText(guest: WebContents, expectedUrl: st
       timer = setTimeout(() => { reject(new Error('SIDEBAR_FRAME_READ_TIMEOUT')) }, 12_000)
     }) ])
   } finally { clearTimeout(timer) }
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function checkedClip(value: BrowserScreenshotClip | undefined, width: number, height: number): void {
+  if (value !== undefined && (!Number.isSafeInteger(value.x) || !Number.isSafeInteger(value.y) ||
+    !Number.isSafeInteger(value.width) || !Number.isSafeInteger(value.height) ||
+    value.x < 0 || value.y < 0 || value.width < 1 || value.height < 1 ||
+    value.x + value.width > width || value.y + value.height > height)) {
+    throw new Error('SIDEBAR_CLIP_OUT_OF_BOUNDS')
+  }
+}
+
+function pngData(bytes: Buffer, width: number, height: number): string {
+  if (bytes.length < 24 || bytes.length > MAX_IMAGE_BYTES ||
+    !bytes.subarray(0, 8).equals(PNG_SIGNATURE) ||
+    bytes.readUInt32BE(16) !== width || bytes.readUInt32BE(20) !== height) {
+    throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+  }
+  return bytes.toString('base64')
+}
+
+/** Capture only the named guest viewport after every real frame origin is approved. */
+export async function captureBrowserViewport(guest: WebContents, expectedUrl: string,
+  clip: BrowserScreenshotClip | undefined, approvedOrigins: readonly string[]): Promise<BrowserFrameScreenshot> {
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([ (async () => {
+      const image = await guest.capturePage()
+      if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      const viewport = image.getSize()
+      if (image.isEmpty() || !Number.isSafeInteger(viewport.width) ||
+        !Number.isSafeInteger(viewport.height) || viewport.width < 1 || viewport.height < 1 ||
+        viewport.width > MAX_DIMENSION || viewport.height > MAX_DIMENSION ||
+        viewport.width * viewport.height > MAX_PIXELS) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      checkedClip(clip, viewport.width, viewport.height)
+      const output = clip === undefined ? image : image.crop(clip)
+      const size = output.getSize()
+      const base64 = pngData(output.toPNG(), size.width, size.height)
+      if (output.isEmpty() || clip !== undefined &&
+        (size.width !== clip.width || size.height !== clip.height) ||
+        auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      }
+      return { url: expectedUrl, title: guest.getTitle().slice(0, 512), base64, viewport }
+    })(), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => { reject(new Error('SIDEBAR_CAPTURE_TIMEOUT')) }, 12_000)
+    }) ])
+  } finally { clearTimeout(timer) }
+}
+
+/** Capture a full page through fixed CDP commands, with every frame origin approved. */
+export async function captureBrowserFullPage(guest: WebContents, expectedUrl: string,
+  clip: BrowserScreenshotClip | undefined, approvedOrigins: readonly string[]): Promise<BrowserFrameScreenshot> {
+  const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
+  const debuggerApi = guest.debugger
+  if (debuggerApi.isAttached()) throw new Error('SIDEBAR_CAPTURE_BUSY')
+  debuggerApi.attach()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([ (async () => {
+      const layout: unknown = await debuggerApi.sendCommand('Page.getLayoutMetrics')
+      if (!record(layout) || !record(layout.cssContentSize) ||
+        ![layout.cssContentSize.x, layout.cssContentSize.y,
+          layout.cssContentSize.width, layout.cssContentSize.height]
+          .every(n => typeof n === 'number' && Number.isFinite(n))) {
+        throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      }
+      const x = layout.cssContentSize.x as number
+      const y = layout.cssContentSize.y as number
+      const width = Math.ceil(layout.cssContentSize.width as number)
+      const height = Math.ceil(layout.cssContentSize.height as number)
+      if (width < 1 || height < 1 || width > MAX_DIMENSION || height > MAX_DIMENSION ||
+        width * height > MAX_PIXELS) throw new Error('SIDEBAR_IMAGE_TOO_LARGE')
+      checkedClip(clip, width, height)
+      const ratio: unknown = await debuggerApi.sendCommand('Runtime.evaluate', {
+        expression: 'window.devicePixelRatio', returnByValue: true,
+      })
+      if (!record(ratio) || !record(ratio.result) ||
+        typeof ratio.result.value !== 'number' || !Number.isFinite(ratio.result.value) ||
+        ratio.result.value < 0.5 || ratio.result.value > 4) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      const target = { x: x + (clip?.x ?? 0), y: y + (clip?.y ?? 0),
+        width: clip?.width ?? width, height: clip?.height ?? height,
+        scale: 1 / ratio.result.value }
+      if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      const raw: unknown = await debuggerApi.sendCommand('Page.captureScreenshot', {
+        format: 'png', fromSurface: true, captureBeyondViewport: true, clip: target,
+      })
+      if (auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== before) {
+        throw new Error('SIDEBAR_NAVIGATED')
+      }
+      if (!record(raw) || typeof raw.data !== 'string' ||
+        raw.data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      const bytes = Buffer.from(raw.data, 'base64')
+      if (bytes.toString('base64') !== raw.data) throw new Error('SIDEBAR_IMAGE_UNAVAILABLE')
+      const base64 = pngData(bytes, target.width, target.height)
+      return { url: expectedUrl, title: guest.getTitle().slice(0, 512), base64,
+        viewport: { width, height } }
+    })(), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => { reject(new Error('SIDEBAR_CAPTURE_TIMEOUT')) }, 12_000)
+    }) ])
+  } finally {
+    clearTimeout(timer)
+    if (debuggerApi.isAttached()) debuggerApi.detach()
+  }
 }
