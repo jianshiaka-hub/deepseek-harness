@@ -31,6 +31,12 @@ export interface DesktopBrowserOpenRequest {
   readonly url: string
 }
 
+/** Bounded status of one intercepted native file input. */
+export type BrowserFileChooserStatus =
+  | { readonly state: 'waiting' }
+  | { readonly state: 'offered'; readonly origin: string; readonly multiple: boolean }
+  | { readonly state: 'failed'; readonly reason: string }
+
 /** A held main-frame request from an agent-touched Sidebar guest. */
 export interface DesktopBrowserNavigationIntent {
   readonly token: string
@@ -231,6 +237,13 @@ export interface DesktopBrowserBridge {
     value?: string): Promise<BrowserForeignInputState>
   /** Extends foreignInputState with focus/check phases for append typing. */
   readonly foreignFrameTypeVersion?: 1
+  /** One intercepted native file input for an approved selected guest. */
+  readonly fileChooserVersion?: 1
+  beginFileChooser?(lease: DesktopBrowserLeaseId, expectedUrl: string): Promise<string>
+  pollFileChooser?(lease: DesktopBrowserLeaseId, token: string): Promise<BrowserFileChooserStatus>
+  setFileChooserFiles?(lease: DesktopBrowserLeaseId, token: string,
+    origin: string, files: readonly string[]): Promise<void>
+  cancelFileChooser?(lease: DesktopBrowserLeaseId, token: string): Promise<void>
   /** Short clipboard lease for one confirmed rich-text paste. */
   readonly richPasteVersion?: 1
   beginPaste?(lease: DesktopBrowserLeaseId, expectedUrl: string, payload: {

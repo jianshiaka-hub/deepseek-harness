@@ -722,6 +722,23 @@ async function main(): Promise<void> {
     return browserGuests.foreignInputState(event.sender, lease, expectedUrl, ref,
       approvedOrigins, phase, value)
   })
+  ipcMain.handle(DESKTOP_IPC.browserFileChooserBegin, (event, lease: unknown, expectedUrl: unknown) => {
+    assertProductSender(event)
+    return browserGuests.beginFileChooser(event.sender, lease, expectedUrl)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserFileChooserPoll, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.pollFileChooser(event.sender, lease, token)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserFileChooserFiles, (event, lease: unknown, token: unknown,
+    origin: unknown, files: unknown) => {
+    assertProductSender(event)
+    return browserGuests.setFileChooserFiles(event.sender, lease, token, origin, files)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserFileChooserCancel, (event, lease: unknown, token: unknown) => {
+    assertProductSender(event)
+    return browserGuests.cancelFileChooser(event.sender, lease, token)
+  })
   ipcMain.handle(DESKTOP_IPC.browserPasteBegin, (event, lease: unknown, expectedUrl: unknown,
     payload: unknown) => {
     assertProductSender(event)

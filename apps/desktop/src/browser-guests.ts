@@ -7,6 +7,7 @@ import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 import { BrowserClipboardLease, type PastePayload, type RestoreResult } from './browser-clipboard.ts'
 import { BrowserDragLease } from './browser-drag.ts'
+import { BrowserFileChooserLease, type BrowserFileChooserStatus } from './browser-filechooser.ts'
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
@@ -39,6 +40,7 @@ export class DesktopBrowserGuests {
   private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
   private readonly clipboardLease = new BrowserClipboardLease(clipboard, entries => new ClipboardItem(entries))
   private readonly dragLease = new BrowserDragLease()
+  private readonly fileChooserLease = new BrowserFileChooserLease()
   private activePaste: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId; readonly token: string } | undefined
   private activeDrag: { readonly owner: WebContents; readonly lease: DesktopBrowserLeaseId;
     readonly token: string; readonly expectedUrl: string } | undefined
@@ -112,6 +114,7 @@ export class DesktopBrowserGuests {
     if (this.activePaste?.lease === key) await this.finishPaste(owner, key, this.activePaste.token)
     this.clearExpiredDrag()
     if (this.activeDrag?.lease === key) await this.finishDrag(owner, key, this.activeDrag.token)
+    if (lease.guest !== undefined) await this.fileChooserLease.cancelGuest(lease.guest)
     lease.releaseInput?.()
     this.leases.delete(key)
     const guest = lease.guest
@@ -175,6 +178,7 @@ export class DesktopBrowserGuests {
           if (this.activeDrag?.lease === id) {
             void this.finishDrag(owner, id, this.activeDrag.token).catch(() => {})
           }
+          void this.fileChooserLease.cancelGuest(guest).catch(() => {})
           lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id)
         })
         if (lease.initialPreflight !== undefined) {
@@ -489,6 +493,37 @@ export class DesktopBrowserGuests {
   }
 
   /** Stage one short, bounded HTML paste for the caller's live exact-URL guest. */
+  /** Intercept one native file input for this owned, exact-URL guest. */
+  async beginFileChooser(owner: WebContents, id: unknown, expectedUrl: unknown): Promise<string> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    return this.fileChooserLease.begin(guest, expectedUrl as string)
+  }
+
+  /** Reveal only the intercepted input's frame origin and multiplicity. */
+  pollFileChooser(owner: WebContents, id: unknown, token: unknown): BrowserFileChooserStatus {
+    const guest = typeof id === 'string' ? this.leases.get(id as DesktopBrowserLeaseId)?.guest : undefined
+    if (typeof token !== 'string' || guest === undefined ||
+      this.leases.get(id as DesktopBrowserLeaseId)?.owner !== owner ||
+      !this.fileChooserLease.owns(token, guest)) throw new Error('SIDEBAR_FILECHOOSER_LEASE_UNAVAILABLE')
+    return this.fileChooserLease.poll(token)
+  }
+
+  /** Supply approved regular files to that single intercepted input. */
+  async setFileChooserFiles(owner: WebContents, id: unknown, token: unknown,
+    origin: unknown, files: unknown): Promise<void> {
+    const status = this.pollFileChooser(owner, id, token)
+    if (status.state !== 'offered' || typeof origin !== 'string' || status.origin !== origin ||
+      !Array.isArray(files) || files.some(file => typeof file !== 'string')) {
+      throw new Error('SIDEBAR_FILECHOOSER_LEASE_UNAVAILABLE')
+    }
+    await this.fileChooserLease.setFiles(token as string, origin, files as string[])
+  }
+
+  async cancelFileChooser(owner: WebContents, id: unknown, token: unknown): Promise<void> {
+    this.pollFileChooser(owner, id, token)
+    await this.fileChooserLease.cancel(token as string)
+  }
+
   async beginPaste(owner: WebContents, id: unknown, expectedUrl: unknown, payload: unknown): Promise<string> {
     this.clearExpiredPaste()
     if (typeof id !== 'string' || typeof expectedUrl !== 'string' || !this.allowedNavigation(expectedUrl) ||

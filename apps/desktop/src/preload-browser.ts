@@ -44,6 +44,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignFrameTypeVersion: 1,
     richPasteVersion: 1,
     nativeDragVersion: 1,
+    fileChooserVersion: 1,
     foreignFrameOptionVersion: 1,
     foreignFrameKeyVersion: 1,
     foreignFrameSelectionVersion: 1,
@@ -71,6 +72,14 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignInputState: (lease, expectedUrl, ref, approvedOrigins, phase, value) => ipcRenderer.invoke(
       DESKTOP_IPC.browserForeignInputState, lease, expectedUrl, ref, approvedOrigins, phase, value) as
       ReturnType<NonNullable<DesktopBrowserBridge['foreignInputState']>>,
+    beginFileChooser: (lease, expectedUrl) => ipcRenderer.invoke(DESKTOP_IPC.browserFileChooserBegin,
+      lease, expectedUrl) as ReturnType<NonNullable<DesktopBrowserBridge['beginFileChooser']>>,
+    pollFileChooser: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserFileChooserPoll,
+      lease, token) as ReturnType<NonNullable<DesktopBrowserBridge['pollFileChooser']>>,
+    setFileChooserFiles: (lease, token, origin, files) => ipcRenderer.invoke(DESKTOP_IPC.browserFileChooserFiles,
+      lease, token, origin, files) as ReturnType<NonNullable<DesktopBrowserBridge['setFileChooserFiles']>>,
+    cancelFileChooser: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserFileChooserCancel,
+      lease, token) as ReturnType<NonNullable<DesktopBrowserBridge['cancelFileChooser']>>,
     beginPaste: (lease, expectedUrl, payload) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteBegin,
       lease, expectedUrl, payload) as ReturnType<NonNullable<DesktopBrowserBridge['beginPaste']>>,
     finishPaste: (lease, token) => ipcRenderer.invoke(DESKTOP_IPC.browserPasteEnd,
