@@ -49,6 +49,8 @@ export class BrowserController implements HostObservable<BrowserControllerState>
     this.checkpoint = options.initial
     this.page = options.createPage({
       initial: options.initial,
+      ...(options.sessionId === undefined ? {} : { occurrence: {
+        sessionId: options.sessionId, tabId: options.tabId } }),
       ...(options.sessionId === undefined || options.agentInitialClientId === undefined ||
         options.initialUrl === undefined ? {} : { initialPreflight: {
           clientId: options.agentInitialClientId, sessionId: options.sessionId,

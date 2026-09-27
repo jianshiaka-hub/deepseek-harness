@@ -149,7 +149,10 @@ export class ElectronWebViewImpl implements BrowserFrame {
     if (initialPreflight !== undefined && this.pending?.url !== initialPreflight.initialUrl) {
       throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
     }
-    const reservation = await this.bridge.acquire(this.workspaceKey, initialPreflight)
+    const occurrence = this.options.occurrence
+    const acquisition = initialPreflight ?? (occurrence === undefined || this.pending === undefined
+      ? undefined : { ...occurrence, initialUrl: this.pending.url })
+    const reservation = await this.bridge.acquire(this.workspaceKey, acquisition)
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- The signal can abort while acquire is pending.
     if (attachmentSignal.aborted) { await this.release(reservation.lease); return }
     this.lease = reservation.lease

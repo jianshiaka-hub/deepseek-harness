@@ -7,6 +7,7 @@ import type { DesktopBrowserInitialPreflight } from '../../types.ts'
 /** Provider construction inputs; persistence does not enter the live navigation interface. */
 export interface BrowserPageOptions {
   readonly initial: BrowserTabState | undefined
+  readonly occurrence?: { readonly sessionId: string; readonly tabId: string }
   readonly initialPreflight?: DesktopBrowserInitialPreflight
   readonly persist: (state: BrowserTabState) => void
   readonly openRequested: (url: string) => void

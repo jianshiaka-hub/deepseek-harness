@@ -18,6 +18,13 @@ export interface DesktopBrowserInitialPreflight {
   readonly initialUrl: string
 }
 
+/** Identity of the Browser occurrence acquiring a guest for its requested first URL. */
+export interface DesktopBrowserOccurrence {
+  readonly sessionId: string
+  readonly tabId: string
+  readonly initialUrl: string
+}
+
 /** Main-approved request to open an HTTP(S) page from an existing guest. */
 export interface DesktopBrowserOpenRequest {
   readonly lease: DesktopBrowserLeaseId
@@ -42,13 +49,19 @@ export interface DesktopBrowserNavigationIntent {
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
-  acquire(workspace: string, initialPreflight?: DesktopBrowserInitialPreflight): Promise<DesktopBrowserReservation>
+  acquire(workspace: string, initialPreflight?: DesktopBrowserInitialPreflight | DesktopBrowserOccurrence): Promise<DesktopBrowserReservation>
   /** @param lease - the caller's reservation. @returns after its guest has been destroyed. */
   release(lease: DesktopBrowserLeaseId): Promise<void>
   /** Versioned host gate. Plugins may use it when present; older shells omit it. */
   readonly navigationPreflightVersion?: 1
   /** Main-process bootstrap guard for the first request of an agent-created tab. */
   readonly initialNavigationPreflightVersion?: 1
+  /** Reserve a request-before-network gate for an existing empty Browser occurrence. */
+  readonly blankNavigationPreflightVersion?: 1
+  reserveBlankNavigationPreflight?(clientId: string, sessionId: string, tabId: string,
+    initialUrl: string): Promise<void>
+  cancelBlankNavigationPreflight?(clientId: string, sessionId: string, tabId: string,
+    initialUrl: string): Promise<void>
   armNavigationPreflight?(lease: DesktopBrowserLeaseId, clientId: string, sessionId: string,
     tabId: string, navigationEpoch: number, expectedUrl: string): Promise<void>
   resolveNavigationPreflight?(token: string, allowed: boolean): Promise<void>

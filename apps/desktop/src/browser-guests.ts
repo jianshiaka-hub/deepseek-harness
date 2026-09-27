@@ -1,7 +1,7 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
 import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
-import type { DesktopBrowserInitialPreflight, DesktopBrowserLeaseId, DesktopBrowserOpenRequest,
+import type { DesktopBrowserInitialPreflight, DesktopBrowserOccurrence, DesktopBrowserLeaseId, DesktopBrowserOpenRequest,
   DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
@@ -13,12 +13,15 @@ interface GuestLease {
   guest?: WebContents
   releaseInput?: () => void
   readonly initialPreflight?: DesktopBrowserInitialPreflight
+  readonly blankClaim?: { readonly key: string; readonly value: DesktopBrowserInitialPreflight }
 }
 
 /** Owns workspace storage partitions independently from individual tab guests. */
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
   private readonly leases = new Map<DesktopBrowserLeaseId, GuestLease>()
+  private readonly blankClaims = new Map<string, { readonly owner: WebContents;
+    readonly value: DesktopBrowserInitialPreflight }>()
   private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
@@ -34,9 +37,21 @@ export class DesktopBrowserGuests {
     if (typeof workspace !== 'string' || workspace.length === 0 || workspace.length > 4096) {
       throw new Error('desktop browser: a workspace storage identity is required')
     }
-    if (initialPreflight !== undefined && !this.validInitialPreflight(initialPreflight)) {
+    const direct = initialPreflight !== undefined && typeof initialPreflight === 'object' &&
+      initialPreflight !== null && 'clientId' in initialPreflight
+    if (initialPreflight !== undefined &&
+      !(direct ? this.validInitialPreflight(initialPreflight) : this.validOccurrence(initialPreflight))) {
       throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
     }
+    const occurrence = direct || initialPreflight === undefined ? undefined
+      : initialPreflight as DesktopBrowserOccurrence
+    const key = occurrence === undefined ? undefined : this.blankClaimKey(owner,
+      occurrence.sessionId, occurrence.tabId)
+    const blankClaim = key === undefined ? undefined : this.blankClaims.get(key)
+    if (blankClaim !== undefined && blankClaim.value.initialUrl !== occurrence?.initialUrl) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    }
+    const guard = direct ? initialPreflight as DesktopBrowserInitialPreflight : blankClaim?.value
     let partition = this.partitions.get(workspace)
     if (partition === undefined) {
       partition = `dsh-sidebar-browser-${randomUUID()}`
@@ -45,7 +60,9 @@ export class DesktopBrowserGuests {
     }
     const lease = randomUUID() as DesktopBrowserLeaseId
     this.leases.set(lease, { owner, partition, attached: false,
-      ...(initialPreflight === undefined ? {} : { initialPreflight }) })
+      ...(guard === undefined ? {} : { initialPreflight: guard }),
+      ...(blankClaim === undefined || key === undefined ? {} : { blankClaim: {
+        key, value: blankClaim.value } }) })
     return { lease, partition }
   }
 
@@ -121,6 +138,14 @@ export class DesktopBrowserGuests {
           try {
             this.navigationPreflight.arm(owner, guest, id, claim.clientId,
               claim.sessionId, claim.tabId, 0, 'about:blank', claim.initialUrl)
+            const blankClaim = lease.blankClaim
+            if (blankClaim !== undefined) {
+              guest.on('did-navigate', (_event, url) => {
+                if (!URL.canParse(url) || !['http:', 'https:'].includes(new URL(url).protocol)) return
+                const current = this.blankClaims.get(blankClaim.key)
+                if (current?.value === blankClaim.value) this.blankClaims.delete(blankClaim.key)
+              })
+            }
           } catch {
             guest.close({ waitForBeforeUnload: false })
             return
@@ -150,6 +175,9 @@ export class DesktopBrowserGuests {
       guest.on('login', (event, _details, _authInfo, callback) => { event.preventDefault(); callback() })
     })
     const releaseAll = (): void => {
+      for (const [key, claim] of this.blankClaims) {
+        if (claim.owner === owner) this.blankClaims.delete(key)
+      }
       for (const [id, lease] of this.leases) {
         if (lease.owner === owner) void this.release(owner, id).catch((error: unknown) => { console.error(error) })
       }
@@ -178,6 +206,34 @@ export class DesktopBrowserGuests {
         details.url, details.method, callback)) return
       callback({ cancel: false })
     })
+  }
+
+  /** Keep an exact one-use claim until a matching guest commits or the owner closes. */
+  reserveBlankNavigationPreflight(owner: WebContents, clientId: unknown, sessionId: unknown,
+    tabId: unknown, initialUrl: unknown): void {
+    const value = { clientId, sessionId, tabId, initialUrl }
+    if (!this.validInitialPreflight(value) || owner.isDestroyed()) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    }
+    const key = this.blankClaimKey(owner, value.sessionId, value.tabId)
+    if (this.blankClaims.has(key) || [...this.blankClaims.values()].filter(row => row.owner === owner).length >= 16) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_BUSY')
+    }
+    this.blankClaims.set(key, { owner, value })
+  }
+
+  cancelBlankNavigationPreflight(owner: WebContents, clientId: unknown, sessionId: unknown,
+    tabId: unknown, initialUrl: unknown): void {
+    const value = { clientId, sessionId, tabId, initialUrl }
+    if (!this.validInitialPreflight(value)) throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    const key = this.blankClaimKey(owner, value.sessionId, value.tabId)
+    const claim = this.blankClaims.get(key)
+    if (claim?.owner === owner && claim.value.clientId === value.clientId &&
+      claim.value.initialUrl === value.initialUrl) this.blankClaims.delete(key)
+  }
+
+  private blankClaimKey(owner: WebContents, sessionId: string, tabId: string): string {
+    return `${owner.id}\0${sessionId}\0${tabId}`
   }
 
   /** A plugin can arm only a guest lease issued to this authenticated application window. */
@@ -223,6 +279,16 @@ export class DesktopBrowserGuests {
     return Object.keys(row).length === 4 &&
       ['clientId', 'sessionId', 'tabId', 'initialUrl'].every(key => typeof row[key] === 'string') &&
       /^[a-f0-9-]{36}$/iu.test(row.clientId as string) &&
+      (row.sessionId as string).length > 0 && (row.sessionId as string).length <= 256 &&
+      (row.tabId as string).length > 0 && (row.tabId as string).length <= 256 &&
+      (row.initialUrl as string).length <= 16_384 && this.allowedNavigation(row.initialUrl as string)
+  }
+
+  private validOccurrence(value: unknown): value is DesktopBrowserOccurrence {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+    const row = value as Record<string, unknown>
+    return Object.keys(row).length === 3 &&
+      ['sessionId', 'tabId', 'initialUrl'].every(key => typeof row[key] === 'string') &&
       (row.sessionId as string).length > 0 && (row.sessionId as string).length <= 256 &&
       (row.tabId as string).length > 0 && (row.tabId as string).length <= 256 &&
       (row.initialUrl as string).length <= 16_384 && this.allowedNavigation(row.initialUrl as string)

@@ -686,6 +686,16 @@ async function main(): Promise<void> {
     browserGuests.armNavigationPreflight(event.sender, lease, clientId, sessionId,
       tabId, navigationEpoch, expectedUrl)
   })
+  ipcMain.handle(DESKTOP_IPC.browserBlankNavigationPreflightReserve, (event,
+    clientId: unknown, sessionId: unknown, tabId: unknown, initialUrl: unknown) => {
+    assertProductSender(event)
+    browserGuests.reserveBlankNavigationPreflight(event.sender, clientId, sessionId, tabId, initialUrl)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserBlankNavigationPreflightCancel, (event,
+    clientId: unknown, sessionId: unknown, tabId: unknown, initialUrl: unknown) => {
+    assertProductSender(event)
+    browserGuests.cancelBlankNavigationPreflight(event.sender, clientId, sessionId, tabId, initialUrl)
+  })
   ipcMain.handle(DESKTOP_IPC.browserNavigationPreflightResolve, (event, token: unknown, allowed: unknown) => {
     assertProductSender(event)
     browserGuests.resolveNavigationPreflight(event.sender, token, allowed)
