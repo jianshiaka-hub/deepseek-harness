@@ -679,6 +679,17 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.release(event.sender, lease)
   })
+  ipcMain.handle(DESKTOP_IPC.browserNavigationPreflightArm, (event, lease: unknown,
+    clientId: unknown, sessionId: unknown, tabId: unknown, navigationEpoch: unknown,
+    expectedUrl: unknown) => {
+    assertProductSender(event)
+    browserGuests.armNavigationPreflight(event.sender, lease, clientId, sessionId,
+      tabId, navigationEpoch, expectedUrl)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserNavigationPreflightResolve, (event, token: unknown, allowed: unknown) => {
+    assertProductSender(event)
+    browserGuests.resolveNavigationPreflight(event.sender, token, allowed)
+  })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*'] }, (details, callback) => {
     if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== mainWindow?.webContents.id) {

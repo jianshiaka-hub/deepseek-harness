@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
 import type { DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
+import { BrowserNavigationPreflight } from './browser-navigation-preflight.ts'
 
 interface GuestLease {
   readonly owner: WebContents
@@ -16,6 +17,7 @@ interface GuestLease {
 export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
   private readonly leases = new Map<DesktopBrowserLeaseId, GuestLease>()
+  private readonly navigationPreflight = new BrowserNavigationPreflight(DESKTOP_IPC.browserNavigationIntent)
 
   /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
   constructor(private readonly hostUrl: () => string | undefined) {}
@@ -55,6 +57,7 @@ export class DesktopBrowserGuests {
     lease.releaseInput?.()
     this.leases.delete(key)
     const guest = lease.guest
+    if (guest !== undefined) this.navigationPreflight.revokeGuest(guest)
     if (guest !== undefined && !guest.isDestroyed()) {
       const destroyed = new Promise<void>((resolve) => { guest.once('destroyed', resolve) })
       guest.close({ waitForBeforeUnload: false })
@@ -106,14 +109,18 @@ export class DesktopBrowserGuests {
         lease.guest = guest
         attachedLease = id
         lease.releaseInput = attachInput(guest, id)
-        guest.once('destroyed', () => { lease.releaseInput?.(); this.leases.delete(id) })
+        guest.once('destroyed', () => { lease.releaseInput?.(); this.navigationPreflight.revokeGuest(guest); this.leases.delete(id) })
       })
       guest.setWindowOpenHandler(({ url, postBody }) => {
         const lease = attachedLease === undefined ? undefined : this.leases.get(attachedLease)
         if (attachedLease !== undefined && lease?.guest === guest && lease.owner === owner && !owner.isDestroyed()
           && postBody === undefined && this.allowedNavigation(url)) {
-          const request: DesktopBrowserOpenRequest = { lease: attachedLease, url: new URL(url).href }
-          owner.send(DESKTOP_IPC.browserOpenRequested, request)
+          const sourceLease = attachedLease
+          const open = (): void => {
+            const request: DesktopBrowserOpenRequest = { lease: sourceLease, url: new URL(url).href }
+            owner.send(DESKTOP_IPC.browserOpenRequested, request)
+          }
+          if (!this.navigationPreflight.interceptPopup(guest, url, open)) open()
         }
         return { action: 'deny' }
       })
@@ -147,10 +154,44 @@ export class DesktopBrowserGuests {
     browserSession.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url)
       const network = ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)
-      callback({ cancel: network
+      const forbidden = network
         ? url.username !== '' || url.password !== '' || this.isApplicationHost(url)
-        : !['about:', 'data:', 'blob:'].includes(url.protocol) })
+        : !['about:', 'data:', 'blob:'].includes(url.protocol)
+      if (forbidden) { callback({ cancel: true }); return }
+      if (this.navigationPreflight.intercept(details.webContentsId, details.resourceType,
+        details.url, details.method, callback)) return
+      callback({ cancel: false })
     })
+  }
+
+  /** A plugin can arm only a guest lease issued to this authenticated application window. */
+  armNavigationPreflight(owner: WebContents, id: unknown, clientId: unknown, sessionId: unknown,
+    tabId: unknown, navigationEpoch: unknown, expectedUrl: unknown): void {
+    if (typeof id !== 'string' || typeof clientId !== 'string' ||
+      !/^[a-f0-9-]{36}$/iu.test(clientId) ||
+      typeof sessionId !== 'string' || sessionId.length < 1 || sessionId.length > 256 ||
+      typeof tabId !== 'string' || tabId.length < 1 || tabId.length > 256 ||
+      typeof navigationEpoch !== 'number' || !Number.isSafeInteger(navigationEpoch) ||
+      typeof expectedUrl !== 'string' || expectedUrl.length > 16_384 ||
+      !this.allowedNavigation(expectedUrl)) {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    }
+    const lease = this.leases.get(id as DesktopBrowserLeaseId)
+    const guest = lease?.guest
+    if (lease === undefined || lease.owner !== owner || !lease.attached || guest === undefined ||
+      guest.isDestroyed() || guest.isLoadingMainFrame() || guest.getURL() !== expectedUrl) {
+      throw new Error('SIDEBAR_TAB_UNAVAILABLE')
+    }
+    this.navigationPreflight.arm(owner, guest, id, clientId, sessionId, tabId,
+      navigationEpoch, expectedUrl)
+  }
+
+  /** A held request can be released only by its owning application window. */
+  resolveNavigationPreflight(owner: WebContents, token: unknown, allowed: unknown): void {
+    if (typeof token !== 'string' || typeof allowed !== 'boolean') {
+      throw new Error('SIDEBAR_NAVIGATION_PREFLIGHT_UNAVAILABLE')
+    }
+    this.navigationPreflight.resolve(token, owner, allowed)
   }
 
   private allowedNavigation(value: string): boolean {
