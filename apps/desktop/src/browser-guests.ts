@@ -305,8 +305,10 @@ export class DesktopBrowserGuests {
         this.activeDialogs.delete(key)
       }
     }
+    const dragOwned = this.dragLease.ownsGuest(guest)
     const token = await this.dialogLease.begin(guest, expectedUrl, approvedPromptOrigins,
-      this.fileChooserLease.ownsGuest(guest))
+      this.fileChooserLease.ownsGuest(guest) || dragOwned)
+    if (dragOwned) this.dragLease.extendForDialog(guest)
     this.activeDialogs.set(key, token)
     return token
   }
@@ -415,6 +417,11 @@ export class DesktopBrowserGuests {
   /** Abandon a watch and dismiss any open modal so the guest is not left blocked. */
   async finishDialog(owner: DialogOwner, id: unknown, token: unknown): Promise<void> {
     const key = this.dialogToken(owner, id, token)
+    const drag = this.activeDrag
+    if (drag?.lease === key) {
+      try { await this.dragLease.cancel(drag.token).catch(() => {}) }
+      finally { if (this.activeDrag === drag) this.activeDrag = undefined }
+    }
     this.activeDialogs.delete(key)
     this.activeNavigations.delete(token as string)
     await this.dialogLease.close(token as string)

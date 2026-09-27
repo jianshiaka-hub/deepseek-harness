@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserDragLease } from '../src/browser-drag.ts'
+import { BrowserDialogLease } from '../src/browser-dialog.ts'
 
 const url = 'https://example.test/page'
 
@@ -29,6 +30,24 @@ function fixture() {
 }
 
 describe('one-guest native drag lease', () => {
+  it('lets a dialog borrow its debugger until the drag finishes', async () => {
+    const h = fixture()
+    h.sendCommand.mockImplementation(async (method: string): Promise<object> =>
+      method === 'Page.addScriptToEvaluateOnNewDocument' ? { identifier: 'dialog-script' } : {})
+    const drag = new BrowserDragLease()
+    const dialog = new BrowserDialogLease()
+    const dragToken = await drag.begin(h.guest, url)
+    expect(drag.ownsGuest(h.guest)).toBe(true)
+    drag.extendForDialog(h.guest)
+    const dialogToken = await dialog.begin(h.guest, url, undefined, drag.ownsGuest(h.guest))
+    expect(h.debuggerPort.attach).toHaveBeenCalledTimes(1)
+    await dialog.close(dialogToken)
+    expect(h.state.attached).toBe(true)
+    await drag.cancel(dragToken)
+    expect(h.state.attached).toBe(false)
+    expect(drag.ownsGuest(h.guest)).toBe(false)
+  })
+
   it('replays captured page drag data into the same guest with fixed drop commands', async () => {
     const h = fixture()
     const lease = new BrowserDragLease()

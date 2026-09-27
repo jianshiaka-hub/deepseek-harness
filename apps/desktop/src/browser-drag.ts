@@ -35,7 +35,7 @@ export class BrowserDragLease {
     readonly onMessage: (_event: unknown, method: string, params: unknown) => void
     readonly onNavigate: () => void
     readonly onDetach: () => void
-    readonly timer: ReturnType<typeof setTimeout>
+    timer: ReturnType<typeof setTimeout>
     data: object | undefined
     invalidated: boolean
     detached: boolean
@@ -44,6 +44,19 @@ export class BrowserDragLease {
   private busy = false
 
   get activeToken(): string | undefined { return this.active?.token }
+
+  ownsGuest(guest: DragGuest): boolean {
+    const active = this.active
+    return active !== undefined && active.guest === guest && !active.invalidated &&
+      !active.detached && !active.finishing
+  }
+
+  extendForDialog(guest: DragGuest): void {
+    const active = this.active
+    if (!this.ownsGuest(guest) || active === undefined) throw new Error('SIDEBAR_DRAG_LEASE_UNAVAILABLE')
+    clearTimeout(active.timer)
+    active.timer = setTimeout(() => { void this.cancel(active.token).catch(() => {}) }, 300_000)
+  }
 
   async begin(guest: DragGuest, expectedUrl: string): Promise<string> {
     if (this.busy || guest.debugger.isAttached()) throw new Error('SIDEBAR_DRAG_BUSY')
