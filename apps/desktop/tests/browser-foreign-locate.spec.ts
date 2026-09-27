@@ -1,7 +1,8 @@
 import { expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
-  stateForBrowserForeignInput, selectBrowserForeignOption } from '../src/browser-foreign-locate.ts'
+  stateForBrowserForeignInput, selectBrowserForeignOption,
+  stateForBrowserForeignKey } from '../src/browser-foreign-locate.ts'
 import { auditBrowserFrames } from '../src/browser-foreign-read.ts'
 
 const topUrl = 'https://example.test/page'
@@ -128,4 +129,24 @@ it('selects only a bounded exact option in an approved foreign frame', async () 
   expect(h.child.executeJavaScript.mock.calls[1]?.[0]).toContain("node.tagName !== 'SELECT'")
   await expect(selectBrowserForeignOption(h.guest, topUrl, ref, sites, [{ value: 'blue', extra: true }]))
     .rejects.toThrow('SIDEBAR_OPTION_UNAVAILABLE')
+})
+
+it('preflights and checks a foreign key target without returning page contents', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ targetUrls: ['https://destination.test/go'] }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:button:Open`
+  await expect(stateForBrowserForeignKey(h.guest, topUrl, ref, [sites[0]!], 'Enter', 'target'))
+    .rejects.toThrow('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+  await expect(stateForBrowserForeignKey(h.guest, topUrl, ref, sites, 'Enter', 'target'))
+    .resolves.toMatchObject({ url: topUrl, origin: sites[1],
+      targetUrls: ['https://destination.test/go'] })
+  const code = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(code).toContain("anchor = node.closest('a[href],area[href]')")
+  expect(code).toContain('return {targetUrls:[...urls]};')
+  expect(code).not.toContain('return {value:')
+  await expect(stateForBrowserForeignKey(h.guest, topUrl, ref, sites, 'Cmd+Enter', 'target'))
+    .rejects.toThrow('SIDEBAR_KEY_TARGET_UNAVAILABLE')
 })

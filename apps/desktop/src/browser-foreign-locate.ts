@@ -1,7 +1,8 @@
 /** Fixed bounded locator for one explicitly selected, site-approved cross-origin frame. */
 import type { WebContents } from 'electron'
 import type { BrowserLocateQuery, BrowserLocateResult, BrowserForeignRefPoint,
-  BrowserForeignInputState, BrowserForeignOptionResult } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+  BrowserForeignInputState, BrowserForeignOptionResult,
+  BrowserForeignKeyState } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { guestDomHelpers, sidebarLocateCode, validSidebarLocateQuery } from './browser-locator-script.ts'
 import { auditBrowserFrames } from './browser-foreign-read.ts'
 
@@ -346,4 +347,84 @@ export async function selectBrowserForeignOption(guest: WebContents, expectedUrl
   }
   return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
     fingerprint: point.fingerprint, selected: raw.selected }
+}
+
+/** Inspect or focus one approved foreign key target, including statically known navigation sites. */
+export async function stateForBrowserForeignKey(guest: WebContents, expectedUrl: string,
+  input: unknown, approvedOrigins: readonly string[], key: unknown,
+  phase: unknown): Promise<BrowserForeignKeyState> {
+  if (typeof key !== 'string' || key.length < 1 || key.length > 64 ||
+    !['target', 'focus', 'check'].includes(phase as string)) {
+    throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE')
+  }
+  const parts = key.split('+')
+  const name = parts.pop()
+  const modifiers = parts.map(part => part === 'ControlOrMeta' ? 'control-or-meta' : part.toLowerCase())
+  if (name === undefined ||
+    !(new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'PageUp', 'PageDown',
+      'Home', 'End', 'Space']).has(name) || /^[A-Za-z0-9]$/u.test(name) ||
+      /^F(?:[1-9]|1\d|2[0-4])$/u.test(name) || /^Arrow(?:Up|Down|Left|Right)$/u.test(name)) ||
+    modifiers.some(value => !['control', 'meta', 'alt', 'shift', 'control-or-meta'].includes(value)) ||
+    new Set(modifiers).size !== modifiers.length) throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE')
+  const point = await pointForBrowserForeignRef(guest, expectedUrl, input, approvedOrigins)
+  const match = /^x(\d{1,10})-[a-f0-9]{64}\/(.+)$/iu.exec(input as string)
+  if (match === null) throw new Error('SIDEBAR_UNKNOWN_REF')
+  const leaf = guest.mainFrame.framesInSubtree.find(frame => frame.frameTreeNodeId === Number(match[1]))
+  if (leaf?.executeJavaScript === undefined || leaf.origin !== point.origin) {
+    throw new Error('SIDEBAR_STALE_REF')
+  }
+  const raw = await leaf.executeJavaScript(`(() => {
+    if (location.href !== ${JSON.stringify(leaf.url)}) throw new Error('SIDEBAR_NAVIGATED');
+    ${guestDomHelpers}
+    const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
+    if (frames.length !== 0 || !node.isConnected || node.matches('iframe,frame') ||
+      node.tagName === 'INPUT' && node.type === 'password' ||
+      ('disabled' in node && node.disabled)) throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE');
+    ${phase === 'focus' ? `node.focus();
+    if (sidebarActiveElement(document) !== node) throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE');`
+      : phase === 'check' ? `if (sidebarActiveElement(document) !== node) {
+      throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE');
+    }` : ''}
+    const urls = new Set();
+    const add = raw => {
+      const parsed = new URL(raw || document.URL, document.baseURI);
+      if (!['http:','https:'].includes(parsed.protocol) || parsed.username || parsed.password ||
+        parsed.href.length > 16384) throw new Error('SIDEBAR_TARGET_URL_UNAVAILABLE');
+      urls.add(parsed.href);
+      if (urls.size > 16) throw new Error('SIDEBAR_TARGET_LIMIT');
+    };
+    const activation = ${JSON.stringify(parts.length === 0 ? name : null)};
+    if (activation === 'Enter') {
+      const anchor = node.closest('a[href],area[href]');
+      if (anchor) add(anchor.getAttribute('href'));
+    }
+    const submit = ['BUTTON','INPUT'].includes(node.tagName) &&
+      ['submit','image'].includes(node.type);
+    if (['Enter','Space'].includes(activation) && submit && node.form) {
+      add(node.getAttribute('formaction') ?? node.form.getAttribute('action'));
+    } else if (activation === 'Enter' && node.tagName === 'INPUT' && node.form &&
+      !['button','submit','image','reset','checkbox','radio','file','hidden'].includes(node.type)) {
+      add(node.form.getAttribute('action'));
+      let examined = 0;
+      for (const control of node.form.elements ?? []) {
+        if (++examined > 1024) throw new Error('SIDEBAR_TARGET_LIMIT');
+        if (control.form === node.form && !control.disabled &&
+          ['BUTTON','INPUT'].includes(control.tagName) &&
+          ['submit','image'].includes(control.type) &&
+          control.hasAttribute('formaction')) add(control.getAttribute('formaction'));
+      }
+    }
+    return {targetUrls:[...urls]};
+  })()`)
+  if (!record(raw) || !Array.isArray(raw.targetUrls) || raw.targetUrls.length > 16 ||
+    raw.targetUrls.some(url => typeof url !== 'string' || url.length > 16_384 ||
+      !URL.canParse(url) || !['http:', 'https:'].includes(new URL(url).protocol) ||
+      new URL(url).href !== url || new URL(url).username !== '' ||
+      new URL(url).password !== '') ||
+    new Set(raw.targetUrls).size !== raw.targetUrls.length ||
+    auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint !== point.fingerprint) {
+    throw new Error('SIDEBAR_KEY_TARGET_UNAVAILABLE')
+  }
+  return { url: expectedUrl, title: guest.getTitle().slice(0, 512), origin: point.origin,
+    fingerprint: point.fingerprint, targetUrls: raw.targetUrls }
 }

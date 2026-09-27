@@ -151,6 +151,15 @@ export interface BrowserForeignOptionResult {
   readonly selected: readonly string[]
 }
 
+/** Focus and known navigation targets for one approved foreign key recipient. */
+export interface BrowserForeignKeyState {
+  readonly url: string
+  readonly title: string
+  readonly origin: string
+  readonly fingerprint: string
+  readonly targetUrls: readonly string[]
+}
+
 /** Origin-scoped operations; no Electron objects or arbitrary IPC cross this interface. */
 export interface DesktopBrowserBridge {
   /** @param workspace - resolved storage account. @returns one approved guest reservation. */
@@ -196,6 +205,11 @@ export interface DesktopBrowserBridge {
     ref: string, approvedOrigins: readonly string[], options: readonly {
       readonly value?: string; readonly label?: string; readonly index?: number
     }[]): Promise<BrowserForeignOptionResult>
+  /** Fixed key target preflight and focus checks in one approved foreign frame. */
+  readonly foreignFrameKeyVersion?: 1
+  foreignKeyState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    ref: string, approvedOrigins: readonly string[], key: string,
+    phase: 'target' | 'focus' | 'check'): Promise<BrowserForeignKeyState>
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,
