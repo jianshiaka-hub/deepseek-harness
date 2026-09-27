@@ -41,6 +41,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     foreignFrameLocateVersion: 1,
     foreignFramePointVersion: 1,
     foreignFrameInputVersion: 1,
+    foreignFrameTypeVersion: 1,
     foreignFrameCaptureVersion: 1,
     acquire: (workspace, initialPreflight) => ipcRenderer.invoke(DESKTOP_IPC.browserAcquire,
       workspace, initialPreflight) as ReturnType<DesktopBrowserBridge['acquire']>,

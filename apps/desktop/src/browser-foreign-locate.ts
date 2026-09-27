@@ -236,8 +236,8 @@ export async function pointForBrowserForeignRef(guest: WebContents, expectedUrl:
 export async function stateForBrowserForeignInput(guest: WebContents, expectedUrl: string,
   input: unknown, approvedOrigins: readonly string[], phase: unknown,
   value: unknown): Promise<BrowserForeignInputState> {
-  if (!['select', 'verify'].includes(phase as string) ||
-    phase === 'select' && value !== undefined ||
+  if (!['select', 'verify', 'focus', 'check'].includes(phase as string) ||
+    phase !== 'verify' && value !== undefined ||
     phase === 'verify' && (typeof value !== 'string' || value.length > 4000)) {
     throw new Error('SIDEBAR_INPUT_UNAVAILABLE')
   }
@@ -253,13 +253,23 @@ export async function stateForBrowserForeignInput(guest: WebContents, expectedUr
     ${guestDomHelpers}
     const {node,frames} = sidebarResolveRef(${JSON.stringify(match[2])});
     if (frames.length !== 0 || !node.isConnected ||
-      !['INPUT','TEXTAREA'].includes(node.tagName) ||
-      node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type) ||
-      node.disabled || node.readOnly) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+      ('disabled' in node && node.disabled) || ('readOnly' in node && node.readOnly) ||
+      ${phase === 'select' || phase === 'verify'
+        ? `(!['INPUT','TEXTAREA'].includes(node.tagName) ||
+          node.tagName === 'INPUT' && !['text','search','url','tel'].includes(node.type))`
+        : `(node.tagName === 'INPUT' &&
+          !['text','search','email','url','tel','number'].includes(node.type) ||
+          !['INPUT','TEXTAREA'].includes(node.tagName) && !node.isContentEditable)`}) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }
     ${phase === 'select' ? `node.focus();
     if (sidebarActiveElement(document) !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     node.select();
     if (node.selectionStart !== 0 || node.selectionEnd !== node.value.length) {
+      throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
+    }` : phase === 'focus' ? `node.focus();
+    if (sidebarActiveElement(document) !== node) throw new Error('SIDEBAR_INPUT_UNAVAILABLE');`
+      : phase === 'check' ? `if (sidebarActiveElement(document) !== node) {
       throw new Error('SIDEBAR_INPUT_UNAVAILABLE');
     }` : `if (sidebarActiveElement(document) !== node ||
       node.value !== ${JSON.stringify(value)}) throw new Error('SIDEBAR_INPUT_NOT_CONFIRMED');`}

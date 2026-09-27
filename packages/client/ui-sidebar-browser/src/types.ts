@@ -177,8 +177,10 @@ export interface DesktopBrowserBridge {
   /** Focus or verify one visible, approved foreign text field without exporting its value. */
   readonly foreignFrameInputVersion?: 1
   foreignInputState?(lease: DesktopBrowserLeaseId, expectedUrl: string,
-    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify',
+    ref: string, approvedOrigins: readonly string[], phase: 'select' | 'verify' | 'focus' | 'check',
     value?: string): Promise<BrowserForeignInputState>
+  /** Extends foreignInputState with focus/check phases for append typing. */
+  readonly foreignFrameTypeVersion?: 1
   /** Native guest capture after all current frame origins have received exact-site grants. */
   readonly foreignFrameCaptureVersion?: 1
   captureFrameAware?(lease: DesktopBrowserLeaseId, expectedUrl: string,

@@ -100,3 +100,18 @@ it('focuses a verified foreign text field and returns only input state', async (
   await expect(stateForBrowserForeignInput(h.guest, topUrl, ref, sites, 'verify', 5))
     .rejects.toThrow('SIDEBAR_INPUT_UNAVAILABLE')
 })
+
+it('checks a foreign typing target without accepting password inputs', async () => {
+  const h = fixture()
+  Object.assign(h.child, { parent: h.top, executeJavaScript: vi.fn()
+    .mockResolvedValueOnce({ x: 10, y: 5, targetUrl: null })
+    .mockResolvedValueOnce({ hadText: false }) })
+  Object.assign(h.top, { executeJavaScript: vi.fn(async () => ({ x: 31, y: 42 })) })
+  const ref = `x2-${auditBrowserFrames(h.guest, topUrl, sites).fingerprint}/d4-1234abcd:textbox:Name`
+  await expect(stateForBrowserForeignInput(h.guest, topUrl, ref, sites, 'focus', undefined))
+    .resolves.toMatchObject({ origin: sites[1], hadText: false })
+  const code = h.child.executeJavaScript.mock.calls[1]?.[0]
+  expect(code).toContain("['text','search','email','url','tel','number']")
+  expect(code).toContain('node.focus()')
+  expect(code).toContain('sidebarActiveElement(document)')
+})
