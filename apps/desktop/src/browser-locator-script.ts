@@ -545,9 +545,11 @@ export const guestDomHelpers = String.raw`
       for (const child of sidebarComposedChildren(node)) {
         const part = walk(child);
         if (!part) continue;
-        if (child.nodeType === 1 && result && !/\s$/.test(result)) result += ' ';
+        const separated = child.nodeType === 1 &&
+          child.ownerDocument.defaultView.getComputedStyle(child).display !== 'inline';
+        if (separated && result && !/\s$/.test(result)) result += ' ';
         result += part;
-        if (child.nodeType === 1) result += ' ';
+        if (separated) result += ' ';
       }
       return result + sidebarGeneratedText(node, '::after');
     };
@@ -594,9 +596,17 @@ export const guestDomHelpers = String.raw`
         const label = sidebarLabelName(node);
         if (label) return label;
       }
-      return sidebarGeneratedText(node, '::before') +
-        [...sidebarComposedChildren(node)].map(walk).join('') +
-        sidebarGeneratedText(node, '::after');
+      let result = sidebarGeneratedText(node, '::before');
+      for (const child of sidebarComposedChildren(node)) {
+        const part = walk(child);
+        if (!part) continue;
+        const separated = child.nodeType === 1 &&
+          child.ownerDocument.defaultView.getComputedStyle(child).display !== 'inline';
+        if (separated && result && !/\s$/.test(result)) result += ' ';
+        result += part;
+        if (separated) result += ' ';
+      }
+      return result + sidebarGeneratedText(node, '::after');
     };
     return walk(root);
   };

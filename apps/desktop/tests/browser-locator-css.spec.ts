@@ -21,6 +21,48 @@ function count(selector: string, html = '<html><body>' +
   }
 }
 
+function roleNameCount(name: string, html: string): number {
+  const dom = new JSDOM(html, { url, runScripts: 'outside-only' })
+  try {
+    const originalStyle = dom.window.getComputedStyle.bind(dom.window)
+    dom.window.getComputedStyle = (element, pseudo) => {
+      const style = originalStyle(element)
+      return pseudo
+        ? { display: style.display, visibility: style.visibility, content: 'none' } as CSSStyleDeclaration
+        : style
+    }
+    Object.defineProperty(dom.window.Element.prototype, 'getClientRects', {
+      value() { return [{ width: 10, height: 10 }] },
+    })
+    const query = { method: 'getByRole', value: 'button', name, exact: true } as const
+    const result = dom.window.eval(sidebarLocateCode(url, query)) as { count: number }
+    return result.count
+  } finally {
+    dom.window.close()
+  }
+}
+
+it('matches Chromium name spacing for inline and non-inline descendants', () => {
+  const html = '<html><body>' +
+    '<button><span>Swift</span><span>Action</span></button>' +
+    '<button><span style="display:block">Swift</span><span>Action</span></button>' +
+    '<button><span style="display:inline-block">Quick</span><span>Reply</span></button>' +
+    '<button><span style="display:flex">Fast</span><span>Track</span></button>' +
+    '<button><span style="display:contents">Deep</span><span>Link</span></button>' +
+    '<button>Pre<span style="display:block">Mid</span>Post</button>' +
+    '<span id="inline-ref"><span>Ready</span><span>Now</span></span>' +
+    '<button aria-labelledby="inline-ref"></button>' +
+    '<span id="block-ref"><span style="display:block">Ready</span><span>Now</span></span>' +
+    '<button aria-labelledby="block-ref"></button>' +
+    '</body></html>'
+  for (const name of ['SwiftAction', 'Swift Action', 'Quick Reply', 'Fast Track',
+    'Deep Link', 'Pre Mid Post', 'ReadyNow', 'Ready Now']) {
+    expect(roleNameCount(name, html)).toBe(1)
+  }
+  expect(roleNameCount('Swift Now', html)).toBe(0)
+  expect(roleNameCount('Ready Action', html)).toBe(0)
+})
+
 it('matches nested has-text and CSS-escaped strings in an approved frame', () => {
   expect(count(String.raw`article:has(div:has-text("say \"hi\""))`)).toBe(1)
   expect(count(String.raw`article:has-text("C\61 t"):nth-of-type(1)`)).toBe(1)
