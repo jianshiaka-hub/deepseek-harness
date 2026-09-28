@@ -32,6 +32,7 @@ it.skipIf(!hasDisplay)('reads only approved foreign-frame assets and expires the
       assetBytes: 19,
       deniedBeforeGrant: true,
       deniedWithoutAssetGrant: true,
+      foreignButtonName: true,
       staleAfterForeignReload: true,
     })
     expect(report).toHaveProperty('assetCount', 3)

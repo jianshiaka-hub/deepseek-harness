@@ -6,7 +6,7 @@
 
 桌面应用是完整 dsh Web 应用外的一层 Electron 壳。Electron RunAsNode 子进程启动共享 profile runner，Electron 立即从 `dsh-app://app/` 加载打包内的 Web 入口。共享加载页等待 Host 启动注入，然后在同一文档中启动客户端。Electron 将应用 HTTP 请求转发给已认证的 Web Host，转发时丢弃描述 Node fetch 连接而非资源本身的响应头（`transfer-encoding`、`connection`、`keep-alive`），并把插件 bundle 响应标记为 `no-store`，因为其每次启动都变化的 revision 只会在 Chromium 磁盘缓存中累积；WebSocket 流连接到该 Host，仅为归属的应用窗口附加凭据。Node IPC 承载启动注入、就绪与关闭。Desktop 默认使用端口 `19387`，与 Web 的 `3080` 分开；可通过 `webserver.config.port` patch 覆盖。
 
-版本化 Browser 资源桥仅在当前租约绑定的 guest 上读取有界资源清单，且先要求所有活动 frame 的来源获准。它记录每个 frame 的文档标记和原生导航版本；资源来源获准后，才能抓取清单中已有的资源。旧版官方签名桌面壳没有该接口，插件需先检查 `foreignFrameAssetsVersion`。Host 与 Client 的聚合构建都会类型检查共用的 guest 源码。运行 `pnpm run build:lib:host` 后，`pnpm exec vitest run --config vitest.e2e.config.ts apps/desktop/tests/browser-foreign-assets.e2e.ts` 会在真实 Electron webview 中验证许可、跨源 frame 资源及清单失效；该原生直连测试不覆盖插件的 Sidebar→Host 路由。
+版本化 Browser 资源桥仅在当前租约绑定的 guest 上读取有界资源清单，且先要求所有活动 frame 的来源获准。它记录每个 frame 的文档标记和原生导航版本；资源来源获准后，才能抓取清单中已有的资源。旧版官方签名桌面壳没有该接口，插件需先检查 `foreignFrameAssetsVersion`。Host 与 Client 的聚合构建都会类型检查共用的 guest 源码。跨源 frame 的角色和名称摘要与 Sidebar 定位器共用 DOM 规则，含按钮内图片的替代文本。运行 `pnpm run build:lib:host` 后，`pnpm exec vitest run --config vitest.e2e.config.ts apps/desktop/tests/browser-foreign-assets.e2e.ts` 会在真实 Electron webview 中验证许可、跨源 frame 资源、按钮的可访问名称及清单失效；该原生直连测试不覆盖插件的 Sidebar→Host 路由。
 
 应用菜单第一项“**关于 DeepSeek Harness**”打开 Electron 原生关于面板，展示应用图标、产品名称和当前安装的发布版本。菜单文案跟随桌面壳的语言。macOS 的隐藏、隐藏其他、显示全部和退出条目使用本地化文案，隐藏和退出条目包含 DeepSeek Harness 产品名称。这些条目保留原生动作和快捷键。macOS 从应用包读取图标，因此未打包的开发启动会显示 Electron 图标；Windows 使用随包分发的 PNG。
 

@@ -36,7 +36,7 @@ const timeout = setTimeout(() => {
     const assetUrl = `${origin(assetServer)}/foreign.png`
     childServer = await serve((_req, response) => {
       response.writeHead(200, {'content-type':'text/html'})
-      response.end(`<!doctype html><title>foreign</title><img src="${assetUrl}">`)
+      response.end(`<!doctype html><title>foreign</title><button><img alt="Save" src="${assetUrl}"></button>`)
     })
     const childUrl = `${origin(childServer)}/widget`
     topServer = await serve((request, response) => {
@@ -52,6 +52,8 @@ const timeout = setTimeout(() => {
     const frameOrigins = [origin(topServer), origin(childServer)]
     const module = await import(pathToFileURL(join(__dirname,
       '../../lib/types/browser-foreign-assets.js')).href)
+    const readModule = await import(pathToFileURL(join(__dirname,
+      '../../lib/types/browser-foreign-read.js')).href)
     root = new BrowserWindow({ show:false,width:600,height:500,
       webPreferences:{ webviewTag:true,contextIsolation:true,sandbox:true } })
     const attached = new Promise(resolve => {
@@ -88,6 +90,10 @@ const timeout = setTimeout(() => {
     if (Buffer.from(bytes.base64,'base64').toString() !== 'foreign-image-bytes') {
       throw Error('Wrong foreign resource bytes')
     }
+    const foreignText = await readModule.readBrowserForeignText(guest,topUrl,frameOrigins)
+    const foreignButtonName = foreignText.frames.some(frame =>
+      frame.origin === frameOrigins[1] && frame.roles.includes('- button "Save"'))
+    if (!foreignButtonName) throw Error('Foreign image button lost its accessible name')
     await child.executeJavaScript('location.reload()')
     let stale = false
     for (let attempt=0; attempt<40; attempt++) {
@@ -107,6 +113,7 @@ const timeout = setTimeout(() => {
       assetBytes:bytes.size,
       deniedBeforeGrant:denied,
       deniedWithoutAssetGrant:targetDenied,
+      foreignButtonName,
       staleAfterForeignReload:stale,
     })+'\n')
   } catch (error) {

@@ -1,6 +1,7 @@
 /** Bounded, origin-gated text inspection of a Sidebar guest's foreign frames. */
 import { createHash } from 'node:crypto'
 import type { WebContents } from 'electron'
+import { guestDomHelpers } from './browser-locator-script.ts'
 
 export interface BrowserFrameAudit {
   readonly origins: readonly string[]
@@ -32,6 +33,7 @@ const MAX_IMAGE_BYTES = 4_194_304
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
 const FOREIGN_FRAME_SNAPSHOT = String.raw`(() => {
+  ${guestDomHelpers}
   const text = String(document.body?.innerText ?? '').slice(0,1000).replaceAll('[ref=','[ref =');
   const selector = 'a,button,input,textarea,select,img[alt],area[alt],[role],[contenteditable],h1,h2,h3';
   const nodes = [...document.querySelectorAll(selector)].slice(0,150);
@@ -41,22 +43,7 @@ const FOREIGN_FRAME_SNAPSHOT = String.raw`(() => {
     const style = getComputedStyle(node);
     if (style.visibility === 'hidden' || style.visibility === 'collapse' ||
       ![...node.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)) continue;
-    const rawRole = node.getAttribute('role') || '';
-    const role = /^[a-z][a-z0-9-]{0,31}$/.test(rawRole) ? rawRole :
-      node.tagName === 'INPUT' ? ({checkbox:'checkbox',radio:'radio',button:'button',submit:'button',
-        reset:'button',search:'searchbox',range:'slider',number:'spinbutton'})[node.type] || 'textbox' :
-      ({A:'link',AREA:'link',IMG:'img',BUTTON:'button',TEXTAREA:'textbox',SELECT:'combobox',
-        H1:'heading',H2:'heading',H3:'heading'})[node.tagName] ||
-        (node.getAttribute('contenteditable') !== null ? 'textbox' : node.tagName.toLowerCase());
-    const ids = (node.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean).slice(0,8);
-    const linked = ids.map(id => document.getElementById(id)?.innerText || '').join(' ').trim();
-    const labels = node.labels ? [...node.labels].slice(0,8).map(label => label.innerText || '').join(' ') : '';
-    const formField = ['INPUT','TEXTAREA','SELECT'].includes(node.tagName) &&
-      !['button','submit','reset'].includes(node.type);
-    const name = (linked || node.getAttribute('aria-label') || labels ||
-      (formField ? '' : node.tagName === 'INPUT' ? node.value : node.getAttribute('alt') || node.innerText) ||
-      node.getAttribute('title') || node.getAttribute('placeholder') || '')
-      .trim().replace(/\s+/g,' ').replaceAll('[ref=','[ref =').slice(0,60);
+    const { role, name } = sidebarDescribe(node);
     roles.push('- ' + role + ' ' + JSON.stringify(name));
   }
   return {text,roles:roles.join('\n').slice(0,2000)};
@@ -113,7 +100,7 @@ export function auditBrowserFrames(guest: WebContents, expectedUrl: string,
     frames.map(frame => [frame.frameTreeNodeId, frame.origin, frame.url]))).digest('hex') }
 }
 
-/** Read bounded visible text only from frames whose current origins are all approved. */
+/** Read bounded visible text and shared DOM role/name summaries only after all frame origins are approved. */
 export async function readBrowserForeignText(guest: WebContents, expectedUrl: string,
   approvedOrigins: readonly string[]): Promise<BrowserForeignText> {
   const before = auditBrowserFrames(guest, expectedUrl, approvedOrigins).fingerprint
