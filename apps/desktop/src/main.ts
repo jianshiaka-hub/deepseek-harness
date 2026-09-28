@@ -706,6 +706,25 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return browserGuests.inspectForeignText(event.sender, lease, expectedUrl, approvedOrigins)
   })
+  ipcMain.handle(DESKTOP_IPC.browserListFrameAssets, (event, lease: unknown,
+    expectedUrl: unknown, approvedOrigins: unknown, marker: unknown) => {
+    assertProductSender(event)
+    return browserGuests.listFrameAssets(event.sender, lease, expectedUrl,
+      approvedOrigins, marker)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserCheckFrameAssets, (event, lease: unknown,
+    expectedUrl: unknown, approvedOrigins: unknown, marker: unknown) => {
+    assertProductSender(event)
+    return browserGuests.checkFrameAssets(event.sender, lease, expectedUrl,
+      approvedOrigins, marker)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserFetchFrameAsset, (event, lease: unknown,
+    expectedUrl: unknown, approvedOrigins: unknown, approvedAssetOrigin: unknown,
+    marker: unknown, assetId: unknown) => {
+    assertProductSender(event)
+    return browserGuests.fetchFrameAsset(event.sender, lease, expectedUrl,
+      approvedOrigins, approvedAssetOrigin, marker, assetId)
+  })
   ipcMain.handle(DESKTOP_IPC.browserLocateForeign, (event, lease: unknown,
     expectedUrl: unknown, query: unknown, approvedOrigins: unknown) => {
     assertProductSender(event)

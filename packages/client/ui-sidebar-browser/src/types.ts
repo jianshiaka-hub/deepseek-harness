@@ -244,6 +244,54 @@ export interface DesktopBrowserBridge {
       readonly roles: string
     }[]
   }>
+  /** Inventory and fetch page resources from every explicitly approved guest frame. */
+  readonly foreignFrameAssetsVersion?: 1
+  listFrameAssets?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[], marker: string): Promise<{
+    readonly id: string
+    readonly fingerprint: string
+    readonly pageUrl: string
+    readonly frames: readonly {
+      readonly path: readonly number[]
+      readonly frameId: number
+      readonly url: string
+      readonly origin: string
+    }[]
+    readonly frameUrls: readonly string[]
+    readonly assets: readonly {
+      readonly id: string
+      readonly frameIndex: number
+      readonly kind: 'font' | 'image' | 'stylesheet' | 'video' | 'script' | 'other'
+      readonly name: string
+      readonly url: string
+      readonly sources: readonly {
+        readonly kind: string
+        readonly nodeId?: number
+        readonly property?: string
+      }[]
+    }[]
+    readonly inlineSvgs: readonly {
+      readonly id: string
+      readonly frameIndex: number
+      readonly markup: string
+      readonly name: string
+    }[]
+    readonly skippedFrameCount: number
+    readonly summary: {
+      readonly byKind: Readonly<Record<string, number>>
+      readonly inlineSvgCount: number
+      readonly totalCount: number
+    }
+  }>
+  checkFrameAssets?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[], marker: string): Promise<true>
+  fetchFrameAsset?(lease: DesktopBrowserLeaseId, expectedUrl: string,
+    approvedOrigins: readonly string[], approvedAssetOrigin: string | null,
+    marker: string, assetId: string): Promise<{
+    readonly base64: string
+    readonly size: number
+    readonly contentType: string | null
+  }>
   /** Fixed locator in an explicitly selected, approved foreign frame. Null means the path stayed same-origin. */
   readonly foreignFrameLocateVersion?: 1
   locateForeign?(lease: DesktopBrowserLeaseId, expectedUrl: string,

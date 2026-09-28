@@ -70,6 +70,8 @@ Each tab's `BrowserController` owns address validation, commands and explicit re
 
 Desktop's main process approves guest leases and enforces attachment, navigation and permission policy. Preload exposes only scoped Browser operations. Shared declarations use the standard `/types` export with `import type`; the Host and Client compile through separate tsconfig files. Desktop Browser tabs declare `keepMounted`, so Sidebar preserves their DOM across tab changes, Session switches, collapse and floating.
 
+The optional `foreignFrameAssetsVersion: 1` bridge lets an approved plugin list resources in every native Browser frame and fetch only an ID from that bounded inventory. The caller must authorize every current frame origin before listing and the resource origin before fetching. The main process binds the inventory to the exact guest and frame documents; navigation, lease destruction, missing grants, and unlisted resource IDs refuse further reads. Older Desktop releases omit this bridge.
+
 The page refresh shortcut calls the same reload operation as the toolbar. Its tooltip and ARIA key combination follow the effective binding. Desktop routes accepted shortcuts from an approved guest through its owning window; the focused webview must still carry that guest’s lease. Web leaves browser-reserved combinations unchanged.
 
 </details>

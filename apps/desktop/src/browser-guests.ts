@@ -14,6 +14,8 @@ import type { BrowserDownloadStatus } from '@deepseek-ai/dsh-client-ui-sidebar-b
 import { auditBrowserFrames, readBrowserForeignText, captureBrowserFullPage,
   captureBrowserViewport, type BrowserFrameAudit, type BrowserForeignText,
   type BrowserFrameScreenshot, type BrowserScreenshotClip } from './browser-foreign-read.ts'
+import { listBrowserFrameAssets, checkBrowserFrameAssets, fetchBrowserFrameAsset,
+  type FrameInventory } from './browser-foreign-assets.ts'
 import { locateBrowserForeignFrame, pointForBrowserForeignRef,
   stateForBrowserForeignInput, selectBrowserForeignOption,
   stateForBrowserForeignKey, selectBrowserForeignText,
@@ -487,6 +489,45 @@ export class DesktopBrowserGuests {
       throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
     }
     return readBrowserForeignText(guest, expectedUrl as string, approvedOrigins as string[])
+  }
+
+  /** List resources only after every live frame origin has an exact-site grant. */
+  listFrameAssets(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown, marker: unknown): Promise<FrameInventory> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 ||
+      approvedOrigins.length > 100 || approvedOrigins.some(origin => typeof origin !== 'string') ||
+      typeof marker !== 'string') throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    return listBrowserFrameAssets(guest, expectedUrl as string, approvedOrigins as string[], marker)
+  }
+
+  /** Reject inventories after frame navigation, including same-URL document replacement. */
+  checkFrameAssets(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown, marker: unknown): Promise<true> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 ||
+      approvedOrigins.length > 100 || approvedOrigins.some(origin => typeof origin !== 'string') ||
+      typeof marker !== 'string') throw new Error('SIDEBAR_FRAME_SITE_NOT_APPROVED')
+    return checkBrowserFrameAssets(guest, expectedUrl as string, approvedOrigins as string[], marker)
+  }
+
+  /** Fetch only an inventoried resource from its original guest frame. */
+  fetchFrameAsset(owner: WebContents, id: unknown, expectedUrl: unknown,
+    approvedOrigins: unknown, approvedAssetOrigin: unknown, marker: unknown,
+    assetId: unknown): Promise<{
+    readonly base64: string
+    readonly size: number
+    readonly contentType: string | null
+  }> {
+    const guest = this.readableGuest(owner, id, expectedUrl)
+    if (!Array.isArray(approvedOrigins) || approvedOrigins.length < 1 ||
+      approvedOrigins.length > 100 || approvedOrigins.some(origin => typeof origin !== 'string') ||
+      approvedAssetOrigin !== null && typeof approvedAssetOrigin !== 'string' ||
+      typeof marker !== 'string' || typeof assetId !== 'string') {
+      throw new Error('SIDEBAR_ASSET_SITE_NOT_APPROVED')
+    }
+    return fetchBrowserFrameAsset(guest, expectedUrl as string, approvedOrigins as string[],
+      approvedAssetOrigin, marker, assetId)
   }
 
   /** Resolve only a fixed, bounded locator against the caller's approved guest frame. */

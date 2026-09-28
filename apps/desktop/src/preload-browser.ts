@@ -38,6 +38,7 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     initialNavigationPreflightVersion: 1,
     blankNavigationPreflightVersion: 1,
     foreignFrameReadVersion: 1,
+    foreignFrameAssetsVersion: 1,
     foreignFrameLocateVersion: 1,
     foreignFramePointVersion: 1,
     foreignFrameInputVersion: 1,
@@ -65,6 +66,16 @@ export function createDesktopBrowserBridge(): DesktopBrowserBridge {
     inspectForeignText: (lease, expectedUrl, approvedOrigins) => ipcRenderer.invoke(
       DESKTOP_IPC.browserInspectForeignText, lease, expectedUrl, approvedOrigins) as
       ReturnType<NonNullable<DesktopBrowserBridge['inspectForeignText']>>,
+    listFrameAssets: (lease, expectedUrl, approvedOrigins, marker) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserListFrameAssets, lease, expectedUrl, approvedOrigins, marker) as
+      ReturnType<NonNullable<DesktopBrowserBridge['listFrameAssets']>>,
+    checkFrameAssets: (lease, expectedUrl, approvedOrigins, marker) => ipcRenderer.invoke(
+      DESKTOP_IPC.browserCheckFrameAssets, lease, expectedUrl, approvedOrigins, marker) as
+      ReturnType<NonNullable<DesktopBrowserBridge['checkFrameAssets']>>,
+    fetchFrameAsset: (lease, expectedUrl, approvedOrigins, approvedAssetOrigin, marker, assetId) =>
+      ipcRenderer.invoke(DESKTOP_IPC.browserFetchFrameAsset, lease, expectedUrl,
+        approvedOrigins, approvedAssetOrigin, marker, assetId) as
+      ReturnType<NonNullable<DesktopBrowserBridge['fetchFrameAsset']>>,
     locateForeign: (lease, expectedUrl, query, approvedOrigins) => ipcRenderer.invoke(
       DESKTOP_IPC.browserLocateForeign, lease, expectedUrl, query, approvedOrigins) as
       ReturnType<NonNullable<DesktopBrowserBridge['locateForeign']>>,
