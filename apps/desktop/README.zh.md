@@ -86,7 +86,7 @@ Electron 拥有 `$DSH_HOME/profiles/desktop`。其 `dependencies` 包含 pnpm �
 
 只有主应用窗口启用 `<webview>`。guest 挂载必须匹配主进程签发的租约和分区；guest 保持 sandbox、context isolation 和 Web security，不启用 Node integration 或 guest preload。Browser IPC 监听只为应用文档创建。[Sidebar Browser](../../packages/client/ui-sidebar-browser/README.zh.md) 说明存储分组和 guest 限制；Host 鉴权仍独立于 URL 过滤而必需。
 
-可选的 Computer Use 定位脚本允许在 `:has()` 后代选择器中使用 `:has-text()`，也可与原生 CSS 伪类组合。它还支持有界的 `:text()`、`:text-is()` 最小元素匹配及 `:visible` 筛选。匹配前解析引号文字和 CSS 转义；格式错误的文字参数不匹配，脚本、样式及文档头的内容不参与文字匹配。
+可选的 Computer Use 定位脚本允许在 `:has()` 后代选择器中使用 `:has-text()`，也可与原生 CSS 伪类组合。它还支持有界的 `:text()`、`:text-is()` 最小元素匹配、`:visible` 筛选，以及按整个文档匹配顺序从 1 开始计数的 `:nth-match(selector, index)`。匹配前解析引号文字和 CSS 转义；格式错误的文字参数不匹配，脚本、样式及文档头的内容不参与文字匹配。
 
 `dsh-app://shell/` 无需联系 Host 即可提供打包的更新文档、脚本和样式。静态请求保留 GET/HEAD、路径范围和 MIME 处理；每个更新文档继续使用隔离 preload 和所属窗口的 IPC 校验。
 

@@ -84,7 +84,7 @@ The application preload exposes boot readiness, fatal startup reporting, native 
 
 Only the main application window enables `<webview>`. Guest attachment must match a main-issued lease and partition; guests keep sandbox, context isolation and Web security without Node integration or guest preload. Browser IPC listeners are created only for the application document. [Sidebar Browser](../../packages/client/ui-sidebar-browser/README.md) describes storage grouping and guest limitations; Host authentication remains required independently of URL filtering.
 
-The optional Computer Use locator script accepts `:has-text()` inside a `:has()` descendant selector and alongside native CSS pseudo-classes. It also supports bounded `:text()` and `:text-is()` smallest-element matching and `:visible` filtering. Quoted text and CSS escapes are parsed before matching; malformed text arguments do not match. Text matching excludes script, style and document-head content.
+The optional Computer Use locator script accepts `:has-text()` inside a `:has()` descendant selector and alongside native CSS pseudo-classes. It also supports bounded `:text()` and `:text-is()` smallest-element matching, `:visible` filtering, and document-wide one-based `:nth-match(selector, index)` selection. Quoted text and CSS escapes are parsed before matching; malformed text arguments do not match. Text matching excludes script, style and document-head content.
 
 The `dsh-app://shell/` origin serves packaged update documents, scripts, and styles without contacting the Host. Static requests retain GET/HEAD, path-containment, and MIME handling; each update document keeps its isolated preload and owned-window IPC checks.
 

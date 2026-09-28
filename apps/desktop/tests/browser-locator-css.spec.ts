@@ -47,3 +47,16 @@ it('matches smallest text and visible CSS pseudos in an approved frame', () => {
   expect(count('nav:has(> button:visible)', html)).toBe(1)
   expect(count('button:text("log"):visible', html)).toBe(1)
 })
+
+it('matches the document-wide one-based nth Playwright CSS result', () => {
+  const html = '<html><body><section id="offers">' +
+    '<button>Buy</button><div><button>Buy</button></div><button>Other</button>' +
+    '<button>Buy</button></section></body></html>'
+  expect(count(':nth-match(:text("Buy"), 2)', html)).toBe(1)
+  expect(count('#offers :nth-match(:text("Buy"), 2)', html)).toBe(1)
+  expect(count('button:nth-match(:text("Buy"), 2)', html)).toBe(1)
+  expect(count(':nth-match(button:has-text("Buy"), 3)', html)).toBe(1)
+  expect(count(':nth-match(:text("Buy"), 4)', html)).toBe(0)
+  expect(count(':nth-match(:text("Buy"), 0)', html)).toBe(0)
+  expect(count('button:nth-child(1)', html)).toBe(2)
+})

@@ -133,6 +133,7 @@ export const guestDomHelpers = String.raw`
       ? [...node.childNodes,...node.shadowRoot.childNodes] : node.childNodes || [];
   };
   let sidebarCssHasBudget = 100000;
+  const sidebarNthMatchCache = new WeakMap();
   const sidebarCssText = root => {
     const stack = [root];
     let value = '';
@@ -174,6 +175,7 @@ export const guestDomHelpers = String.raw`
               return {name:'visible',argument:'',rest:part.slice(0,i) + part.slice(i + 8)};
             }
             const name = part.startsWith(':has-text(',i) ? 'has-text' :
+              part.startsWith(':nth-match(',i) ? 'nth-match' :
               part.startsWith(':text-is(',i) ? 'text-is' :
               part.startsWith(':text(',i) ? 'text' :
               part.startsWith(':has(',i) ? 'has' : null;
@@ -295,6 +297,19 @@ export const guestDomHelpers = String.raw`
               const needle = text === null ? '' : sidebarCssNormalize(text);
               return needle.length > 0 &&
                 sidebarCssSmallestText(candidate,needle,pseudo.name === 'text-is');
+            }
+            if (pseudo.name === 'nth-match') {
+              const argument = /^([\s\S]+),\s*([1-9]\d*)\s*$/.exec(pseudo.argument);
+              const inner = argument?.[1].trim();
+              const index = Number(argument?.[2]);
+              if (!inner || !Number.isSafeInteger(index) || index > 100000) return false;
+              const doc = candidate.ownerDocument;
+              let matches = sidebarNthMatchCache.get(doc);
+              if (!matches) { matches = new Map(); sidebarNthMatchCache.set(doc,matches); }
+              if (!matches.has(inner)) {
+                matches.set(inner,sidebarAllNodes(doc).filter(node => sidebarMatchesCSS(node,inner)));
+              }
+              return matches.get(inner)[index - 1] === candidate;
             }
           } else {
             try { return candidate.matches(part); } catch { return false; }
