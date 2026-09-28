@@ -146,6 +146,10 @@ export const guestDomHelpers = String.raw`
       }
       if (node.nodeType !== 1 || ['SCRIPT','STYLE','NOSCRIPT'].includes(node.tagName) ||
         node.ownerDocument.head?.contains(node)) continue;
+      if (node.tagName === 'INPUT' && ['button','submit'].includes(node.type)) {
+        value += node.value || '';
+        if (value.length > 200000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+      }
       for (let i = node.childNodes.length - 1; i >= 0; i--) stack.push(node.childNodes[i]);
       if (node.shadowRoot) {
         for (let i = node.shadowRoot.childNodes.length - 1; i >= 0; i--) {
@@ -166,7 +170,12 @@ export const guestDomHelpers = String.raw`
           if (char === '[') { square++; continue; }
           if (char === ']') { square--; continue; }
           if (char === ':' && square === 0 && round === 0) {
+            if (part.startsWith(':visible',i) && !/[a-z0-9_-]/i.test(part[i + 8] || '')) {
+              return {name:'visible',argument:'',rest:part.slice(0,i) + part.slice(i + 8)};
+            }
             const name = part.startsWith(':has-text(',i) ? 'has-text' :
+              part.startsWith(':text-is(',i) ? 'text-is' :
+              part.startsWith(':text(',i) ? 'text' :
               part.startsWith(':has(',i) ? 'has' : null;
             if (name) {
               const open = i + name.length + 1;
@@ -215,6 +224,56 @@ export const guestDomHelpers = String.raw`
         }
         return result;
       };
+      const sidebarCssNormalize = value => value.trim().replace(/\s+/g,' ');
+      const sidebarCssVisible = node => {
+        const style = node.ownerDocument.defaultView.getComputedStyle(node);
+        return style.display !== 'none' && style.visibility !== 'hidden' &&
+          style.visibility !== 'collapse' && style.contentVisibility !== 'hidden' &&
+          [...node.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
+      };
+      const sidebarCssDirectText = node => {
+        if (node.tagName === 'INPUT' && ['button','submit'].includes(node.type)) return [node.value || ''];
+        const segments = [];
+        let segment = '';
+        for (const child of sidebarComposedChildren(node)) {
+          if (--sidebarCssHasBudget < 0) throw new Error('SIDEBAR_DOM_LIMIT');
+          if (child.nodeType === 3) {
+            segment += child.nodeValue || '';
+            if (segment.length > 200000) throw new Error('SIDEBAR_TEXT_TOO_LARGE');
+          } else if (child.nodeType === 1 && segment) {
+            segments.push(segment);
+            segment = '';
+          }
+        }
+        if (segment) segments.push(segment);
+        return segments;
+      };
+      const sidebarCssSmallestText = (node,needle,exact) => {
+        if (['SCRIPT','STYLE','NOSCRIPT'].includes(node.tagName) ||
+          node.ownerDocument.head?.contains(node)) return false;
+        const input = node.tagName === 'INPUT' && ['button','submit'].includes(node.type)
+          ? node.value || '' : null;
+        const matches = exact
+          ? sidebarCssDirectText(node).some(text => sidebarCssNormalize(text) === needle)
+          : sidebarCssNormalize(input ?? sidebarCssText(node)).toLocaleLowerCase()
+            .includes(needle.toLocaleLowerCase());
+        if (!matches) return false;
+        const descendants = [...sidebarComposedChildren(node)].filter(child => child.nodeType === 1);
+        while (descendants.length) {
+          const child = descendants.pop();
+          if (--sidebarCssHasBudget < 0) throw new Error('SIDEBAR_DOM_LIMIT');
+          if (['SCRIPT','STYLE','NOSCRIPT'].includes(child.tagName) ||
+            child.ownerDocument.head?.contains(child)) continue;
+          if (exact) {
+            if (sidebarCssDirectText(child).some(text => sidebarCssNormalize(text) === needle)) return false;
+            for (const nested of sidebarComposedChildren(child)) {
+              if (nested.nodeType === 1) descendants.push(nested);
+            }
+          } else if (sidebarCssNormalize(sidebarCssText(child)).toLocaleLowerCase()
+            .includes(needle.toLocaleLowerCase())) return false;
+        }
+        return true;
+      };
       const sidebarMatchesCSS = (node,selector) => {
         const matchesPart = (candidate,part,depth=0) => {
           if (depth > 16) throw new Error('SIDEBAR_DOM_LIMIT');
@@ -223,12 +282,19 @@ export const guestDomHelpers = String.raw`
           const pseudo = sidebarCssPseudo(part);
           if (pseudo) {
             if (pseudo.rest && !matchesPart(candidate,pseudo.rest,depth+1)) return false;
+            if (pseudo.name === 'visible') return sidebarCssVisible(candidate);
             if (pseudo.name === 'has-text') {
               const text = sidebarCssString(pseudo.argument);
               if (text === null) return false;
-              const needle = text.trim().replace(/\s+/g,' ').toLocaleLowerCase();
-              return needle.length > 0 && sidebarCssText(candidate).replace(/\s+/g,' ')
+              const needle = sidebarCssNormalize(text).toLocaleLowerCase();
+              return needle.length > 0 && sidebarCssNormalize(sidebarCssText(candidate))
                 .toLocaleLowerCase().includes(needle);
+            }
+            if (pseudo.name === 'text' || pseudo.name === 'text-is') {
+              const text = sidebarCssString(pseudo.argument);
+              const needle = text === null ? '' : sidebarCssNormalize(text);
+              return needle.length > 0 &&
+                sidebarCssSmallestText(candidate,needle,pseudo.name === 'text-is');
             }
           } else {
             try { return candidate.matches(part); } catch { return false; }
