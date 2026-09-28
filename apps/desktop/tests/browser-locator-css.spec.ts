@@ -60,3 +60,18 @@ it('matches the document-wide one-based nth Playwright CSS result', () => {
   expect(count(':nth-match(:text("Buy"), 0)', html)).toBe(0)
   expect(count('button:nth-child(1)', html)).toBe(2)
 })
+
+it('matches the smallest regex text in an approved frame', () => {
+  const html = '<html><body><nav id="nav"><button>Log in</button>' +
+    '<button>log   IN</button><button>Cancel</button>' +
+    '<input type="button" value="Submit 42"><script>Hidden 42</script></nav></body></html>'
+  expect(count(String.raw`#nav :text-matches("Log\s*in", "i")`, html)).toBe(2)
+  expect(count(String.raw`#nav :text-matches("Log", "gi")`, html)).toBe(2)
+  expect(count(String.raw`button:text-matches("^Log in$", "")`, html)).toBe(1)
+  expect(count(String.raw`input:text-matches("Submit \d+", "")`, html)).toBe(1)
+  expect(count(String.raw`nav:has(:text-matches("Log\s*in", "i"))`, html)).toBe(1)
+  expect(count(String.raw`:text-matches("Hidden 42", "")`, html)).toBe(0)
+  expect(count(String.raw`:text-matches("(", "")`, html)).toBe(0)
+  expect(count(String.raw`:text-matches("Log", "bad")`, html)).toBe(0)
+  expect(count(`:text-matches("${'a'.repeat(121)}", "")`, html)).toBe(0)
+})

@@ -176,6 +176,7 @@ export const guestDomHelpers = String.raw`
             }
             const name = part.startsWith(':has-text(',i) ? 'has-text' :
               part.startsWith(':nth-match(',i) ? 'nth-match' :
+              part.startsWith(':text-matches(',i) ? 'text-matches' :
               part.startsWith(':text-is(',i) ? 'text-is' :
               part.startsWith(':text(',i) ? 'text' :
               part.startsWith(':has(',i) ? 'has' : null;
@@ -227,6 +228,33 @@ export const guestDomHelpers = String.raw`
         return result;
       };
       const sidebarCssNormalize = value => value.trim().replace(/\s+/g,' ');
+      const sidebarCssRegex = argument => {
+        let quote = '', escaped = false, comma = -1;
+        for (let i = 0; i < argument.length; i++) {
+          const char = argument[i];
+          if (escaped) { escaped = false; continue; }
+          if (char === '\\') { escaped = true; continue; }
+          if (quote) { if (char === quote) quote = ''; continue; }
+          if (char === '"' || char === "'") { quote = char; continue; }
+          if (char === ',') { if (comma >= 0) return null; comma = i; }
+        }
+        if (quote || escaped || comma < 0) return null;
+        const raw = argument.slice(0,comma).trim();
+        const sourceQuote = raw[0];
+        if (!['"',"'"].includes(sourceQuote) || raw.at(-1) !== sourceQuote) return null;
+        let source = '';
+        for (let i = 1; i < raw.length - 1; i++) {
+          const char = raw[i];
+          if (char === sourceQuote) return null;
+          if (char !== '\\') { source += char; continue; }
+          if (++i >= raw.length - 1) return null;
+          const next = raw[i];
+          source += next === sourceQuote || next === '\\' ? next : '\\' + next;
+        }
+        const flags = sidebarCssString(argument.slice(comma + 1));
+        if (!source || source.length > 120 || flags === null || !/^[gimsuy]*$/.test(flags)) return null;
+        try { return new RegExp(source,flags); } catch { return null; }
+      };
       const sidebarCssVisible = node => {
         const style = node.ownerDocument.defaultView.getComputedStyle(node);
         return style.display !== 'none' && style.visibility !== 'hidden' &&
@@ -276,6 +304,26 @@ export const guestDomHelpers = String.raw`
         }
         return true;
       };
+      const sidebarCssSmallestRegex = (node,expression) => {
+        if (['SCRIPT','STYLE','NOSCRIPT'].includes(node.tagName) ||
+          node.ownerDocument.head?.contains(node)) return false;
+        const matches = value => {
+          expression.lastIndex = 0;
+          return expression.test(sidebarCssNormalize(value));
+        };
+        const input = node.tagName === 'INPUT' && ['button','submit'].includes(node.type)
+          ? node.value || '' : null;
+        if (!matches(input ?? sidebarCssText(node))) return false;
+        const descendants = [...sidebarComposedChildren(node)].filter(child => child.nodeType === 1);
+        while (descendants.length) {
+          const child = descendants.pop();
+          if (--sidebarCssHasBudget < 0) throw new Error('SIDEBAR_DOM_LIMIT');
+          if (['SCRIPT','STYLE','NOSCRIPT'].includes(child.tagName) ||
+            child.ownerDocument.head?.contains(child)) continue;
+          if (matches(sidebarCssText(child))) return false;
+        }
+        return true;
+      };
       const sidebarMatchesCSS = (node,selector) => {
         const matchesPart = (candidate,part,depth=0) => {
           if (depth > 16) throw new Error('SIDEBAR_DOM_LIMIT');
@@ -297,6 +345,10 @@ export const guestDomHelpers = String.raw`
               const needle = text === null ? '' : sidebarCssNormalize(text);
               return needle.length > 0 &&
                 sidebarCssSmallestText(candidate,needle,pseudo.name === 'text-is');
+            }
+            if (pseudo.name === 'text-matches') {
+              const expression = sidebarCssRegex(pseudo.argument);
+              return expression !== null && sidebarCssSmallestRegex(candidate,expression);
             }
             if (pseudo.name === 'nth-match') {
               const argument = /^([\s\S]+),\s*([1-9]\d*)\s*$/.exec(pseudo.argument);
